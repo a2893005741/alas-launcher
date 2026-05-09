@@ -35,7 +35,7 @@ impl WebuiLaunchConfig {
                 .and_then(|webui| webui.get("WebuiHost"))
                 .and_then(value_as_string)
                 .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "127.0.0.1".to_owned()),
+                .unwrap_or_else(|| "0.0.0.0".to_owned()),
             port: webui
                 .and_then(|webui| webui.get("WebuiPort"))
                 .and_then(value_as_u16)
