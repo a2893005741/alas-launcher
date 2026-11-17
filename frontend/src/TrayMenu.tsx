@@ -63,7 +63,7 @@ export function TrayMenu() {
     <nav
       className={styles.menu}
       role="menu"
-      aria-label="舰R助手"
+      aria-label="AzurPilot"
       data-motion={motion ? "on" : "off"}
       style={motion ? undefined : { animation: "none" }}
     >

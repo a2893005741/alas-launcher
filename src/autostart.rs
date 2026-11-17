@@ -23,7 +23,7 @@ pub struct AutostartStatus {
 
 /// 注册表 Run 键中本启动器对应的值名。
 #[cfg(windows)]
-const RUN_VALUE_NAME: &str = "WarshipPilot";
+const RUN_VALUE_NAME: &str = "AzurPilot";
 
 /// 当前用户的开机自启注册表键路径。
 #[cfg(windows)]

@@ -28,8 +28,8 @@ import { Confirm } from "./Confirm";
 import { ContextMenu } from "./ContextMenu";
 import { ErrorDialog } from "./ErrorDialog";
 import { SettingsDialog } from "./SettingsDialog";
-
-
+import background from "../../bg/bg.mp4";
+import backgroundPoster from "../../bg/loading.webp";
 import styles from "./launcher.module.css";
 
 const mainIcons: Record<string, ComponentType> = {
@@ -56,6 +56,7 @@ export function App() {
   const [armCancel, setArmCancel] = useState(false);
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const video = useRef<HTMLVideoElement>(null);
   const [localeOverride, setLocaleOverride] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
@@ -108,6 +109,28 @@ export function App() {
       cleanup?.();
     };
   }, []);
+  // Rust 将窗口隐藏/最小化同步到 WebView，触发 visibilitychange 暂停视频；
+  // 系统或设置任一开启“减弱动态效果”时，即使恢复窗口也保持暂停。
+  // 视频持续可见播放会让 WebView2 持有显示器唤醒锁，导致系统无法息屏。
+  // 静音状态由设置的音频开关驱动（默认静音；React 的 muted 属性对
+  // video 元素不可靠，必须直接写 property）。
+  useEffect(() => {
+    const motion = matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => {
+      const element = video.current;
+      if (!element) return;
+      element.muted = !audioEnabled;
+      if (document.hidden || motion.matches || reducedMotion) element.pause();
+      else void element.play().catch(() => {});
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    motion.addEventListener("change", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      motion.removeEventListener("change", sync);
+    };
+  }, [reducedMotion, audioEnabled]);
   // CSS 动画（步骤文字淡入、进度填充过渡）随设置一并停用。
   useEffect(() => {
     document.documentElement.classList.toggle("reduced-motion", reducedMotion);
@@ -272,7 +295,15 @@ export function App() {
   };
   return (
     <div className={styles.shell}>
-      <div className={styles.background} style={{ background: "radial-gradient(ellipse at 80% 25%, #275b80 0%, #142c45 45%, #0d1b2b 100%)" }} aria-hidden="true" />
+      <video
+        ref={video}
+        className={styles.background}
+        src={background}
+        poster={backgroundPoster}
+        loop
+        playsInline
+        aria-hidden="true"
+      />
       <div className={styles.shade} />
       {!connection && (
         <>
@@ -293,7 +324,7 @@ export function App() {
           <div className={styles.brand}>
             <img className={styles.logo} src="/icon.png" alt="" />
             <span className={styles.wordmark}>
-              舰R<span>助手</span>
+              Azur<span>Pilot</span>
             </span>
             <span className={styles.brandVersion}>{context.version}</span>
           </div>

@@ -91,7 +91,7 @@ impl DownloadSource {
                 .and_then(|u| u.host_str().map(str::to_owned));
             !matches!(
                 (prefer_cnb, host.as_deref()),
-                (true, Some("cnb.cool" | "ghfast.top" | "gh-proxy.com"))
+                (true, Some("cnb.cool"))
                     | (false, Some("github.com" | "raw.githubusercontent.com"))
             )
         });

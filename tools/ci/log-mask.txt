@@ -53,9 +53,3 @@ azurpilot.com
 api.cnb.cool
 cnb.cool
 launcher-cloudflare-cdn-download.azurpilot.com
-
-https://github.com/a2893005741/alas-launcher
-https://github.com/a2893005741/WarshipPilot
-https://ghfast.top
-https://gh-proxy.com
-https://raw.githubusercontent.com

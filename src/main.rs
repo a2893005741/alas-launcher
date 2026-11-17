@@ -45,7 +45,6 @@ use windows::*;
 mod components;
 /// 首次部署、组件更新与后端配置。
 mod setup;
-mod warship;
 /// 窗口工具（控制台附着状态等平台辅助）。
 mod window_util;
 
@@ -342,9 +341,6 @@ fn start_minimized_arg_present() -> bool {
 }
 
 fn main() -> Result<()> {
-    if std::env::args().any(|arg| arg == "--verify-install") {
-        return warship::verify_install();
-    }
     launcher::run()
 }
 
@@ -507,7 +503,7 @@ struct LogArchiveProgress {
 async fn prompt_log_archive_path(
     app_handle: tauri::AppHandle,
 ) -> std::result::Result<Option<String>, String> {
-    let archive_name = format!("WarshipPilot-log-{}.zip", Local::now().format("%Y-%m-%d"));
+    let archive_name = format!("AzurPilot-log-{}.zip", Local::now().format("%Y-%m-%d"));
     let mut builder = app_handle.dialog().file();
     builder = builder.add_filter("ZIP", &["zip"]);
     builder = builder.set_file_name(&archive_name);

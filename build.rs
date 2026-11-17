@@ -1,6 +1,6 @@
 //! Tauri 构建脚本：在编译期固化 Windows 清单与关键构建资源。
 //!
-//! 内嵌 Windows manifest（asInvoker 提权、Common-Controls 依赖）；
+//! 内嵌 Windows manifest（requireAdministrator 提权、Common-Controls 依赖）；
 //! 处理 `AZURPILOT_BOOTSTRAP_UV`（内嵌 uv 引导二进制，未设置时写空占位符、
 //! 运行时回退 `UV` 环境变量或 PATH 中的 uv）、
 //! `AZURPILOT_LAUNCHER_MTLS_IDENTITY_PEM_B64`（mTLS 自更新证书
@@ -16,8 +16,7 @@ const REQUIRE_MTLS_ENV: &str = "REQUIRE_LAUNCHER_MTLS_IDENTITY";
 /// 编译期覆盖自更新源地址的环境变量名。
 const LAUNCHER_UPDATE_URL_ENV: &str = "LAUNCHER_UPDATE_URL";
 /// 未显式覆盖时使用的默认自更新源地址。
-const DEFAULT_LAUNCHER_UPDATE_URL: &str =
-    "https://github.com/a2893005741/alas-launcher/releases/download/manifest/stable.json";
+const DEFAULT_LAUNCHER_UPDATE_URL: &str = "https://launcher-api.azurpilot.com/updata/stable.json";
 
 /// 执行 Tauri 构建并把编译期资源写入 `OUT_DIR`。
 ///
@@ -31,7 +30,7 @@ const DEFAULT_LAUNCHER_UPDATE_URL: &str =
 /// `CARGO_MANIFEST_DIR` 缺失、base64 解码失败、本地证书读取失败，或
 /// REQUIRE_LAUNCHER_MTLS_IDENTITY 已设置但证书缺失时直接 panic。
 fn main() {
-    // 内嵌 manifest：asInvoker 保证启动器始终以管理员运行，
+    // 内嵌 manifest：requireAdministrator 保证启动器始终以管理员运行，
     // 以便执行需要提权的安装与修复操作；Common-Controls 6 启用现代视觉
     // 样式，确保原生控件外观一致。
     let windows = tauri_build::WindowsAttributes::new().app_manifest(
@@ -52,7 +51,7 @@ fn main() {
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

@@ -31,15 +31,15 @@ pub type NotificationClickHandler = Arc<dyn Fn() + Send + Sync + 'static>;
 /// Windows 按不同 AUMID 在操作中心分组并展示不同的应用显示名称，
 /// 因此三类通知各用一个 ID，让用户能一眼区分通知来源。
 #[cfg(windows)]
-const WINDOWS_APP_ID: &str = "com.warshippilot.launcher.notification";
+const WINDOWS_APP_ID: &str = "moe.taiho.azurpilot.notification";
 
 /// Windows Toast"更新"通知的 AUMID，更新类事件单独分组以免被普通通知淹没。
 #[cfg(windows)]
-const WINDOWS_APP_ID_UPDATE: &str = "com.warshippilot.launcher.notification.update";
+const WINDOWS_APP_ID_UPDATE: &str = "moe.taiho.azurpilot.notification.update";
 
 /// Windows Toast"公告"通知的 AUMID，运营公告与功能更新同样分开分组。
 #[cfg(windows)]
-const WINDOWS_APP_ID_ANNOUNCEMENT: &str = "com.warshippilot.launcher.notification.announcement";
+const WINDOWS_APP_ID_ANNOUNCEMENT: &str = "moe.taiho.azurpilot.notification.announcement";
 
 /// "一般"通知在操作中心里显示的应用名（随界面语言本地化）。
 fn windows_app_name() -> String {
@@ -275,7 +275,7 @@ fn ensure_windows_app_user_model_id(id: &str, name: &str) -> Result<PathBuf> {
 fn ensure_windows_notification_icon() -> Result<PathBuf> {
     let data_dir = dirs::data_local_dir()
         .ok_or_else(|| anyhow!(t!("errors.appdata_not_found")))?
-        .join("WarshipPilotLauncher");
+        .join("AzurPilotLauncher");
     fs::create_dir_all(&data_dir)?;
 
     // 已存在的图标内容与嵌入版本一致时跳过写入，减少磁盘 IO。

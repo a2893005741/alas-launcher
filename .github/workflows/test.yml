@@ -1,42 +1,145 @@
-name: Test WarshipPilot
-on: [push, pull_request, workflow_dispatch]
+name: Test AzurPilot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
-  group: test-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
 env:
-  AZURPILOT_LOG_MASK_B64: IyBDSSDml6Xlv5fmjqnnoIHmuIXljZXvvIjmmI7mlofln7rlh4bvvInjgIINCiMg5q+P5LiqIGpvYiDpppbmraXmiorlroPpgJDooYzms6jlhozkuLogOjphZGQtbWFzazo677yMR2l0SHViIOS8muaKiuaXpeW/l+S4reWRveS4reeahOWtkOS4suabv+aNouS4uiAqKirjgIINCiMg5L+u5pS55ZCO5omn6KGMOiBiYXNlNjQgLXcwIOacrOaWh+S7tu+8iOi3s+i/h+azqOmHiuihjO+8ie+8jOaKiui+k+WHuuWQjOatpeabv+aNog0KIyAuZ2l0aHViL3dvcmtmbG93cy9wYWNrYWdlLnltbCDkuI4gdGVzdC55bWwg5Lit5omA5pyJIEFaVVJQSUxPVF9MT0dfTUFTS19CNjQg55qE5YC844CCDQojIOazqOaEj++8muacrOaWh+S7tuS4jeS8muWHuueOsOWcqOaXpeW/l+mHjO+8iOaOqeeggeatpemqpOWPqui+k+WHuiBhZGQtbWFzayDlkb3ku6TvvInvvIzmlLnliqjor7fkv53mjIHmr4/ooYzkuIDkuKrlrozmlbTmnaHnm67jgIHkuI3opoHnlZnnqbrooYzjgIINCmh0dHAuaHR0cHM6Ly9naXRodWIuY29tLy5leHRyYWhlYWRlcg0KaHR0cHM6Ly9sYXVuY2hlci1hcGkuYXp1cnBpbG90LmNvbS91cGRhdGEvc3RhYmxlLmpzb24NCmh0dHBzOi8vbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20NCmh0dHBzOi8vbGF1bmNoZXItZG93bmxvYWQuYXp1cnBpbG90LmNvbQ0KaHR0cHM6Ly9hcGkuY25iLmNvb2wNCmh0dHBzOi8vY25iLmNvb2wNCmh0dHBzOi8vZ2l0aHViLmNvbS93ZXNzMDkvQXp1clBpbG90TGF1bmNoZXINCmh0dHBzOi8vZ2l0aHViLmNvbS93ZXNzMDkvQXp1clBpbG90DQpodHRwczovL2FwaS5naXRodWIuY29tDQpodHRwczovL3VwbG9hZHMuZ2l0aHViLmNvbQ0KaHR0cHM6Ly9vYmplY3RzLmdpdGh1YnVzZXJjb250ZW50LmNvbQ0KaHR0cHM6Ly9kb2NzLmdpdGh1Yi5jb20NCmh0dHBzOi8vZ2l0aHViLmNvbS9hc3RyYWwtc2gvc2V0dXAtdXYNCmh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hc3RyYWwtc2gvc2V0dXAtdXYNCmh0dHBzOi8vZ2l0aHViLmNvbS9hc3RyYWwtc2gvdXYNCmh0dHBzOi8vYXN0cmFsLnNoDQpodHRwczovL2dpdGh1Yi5jb20vYWN0aW9ucy9weXRob24tdmVyc2lvbnMNCmh0dHBzOi8vZ2l0aHViLmNvbS9hY3Rpb25zL3NldHVwLXB5dGhvbg0KaHR0cHM6Ly9naXRodWIuY29tL2FjdGlvbnMvbm9kZS12ZXJzaW9ucw0KaHR0cHM6Ly9zdGF0aWMucnVzdC1sYW5nLm9yZw0KaHR0cHM6Ly9zaC5ydXN0dXAucnMNCmh0dHBzOi8vY3JhdGVzLmlvDQpodHRwczovL2luZGV4LmNyYXRlcy5pbw0KaHR0cHM6Ly9zdGF0aWMuY3JhdGVzLmlvDQpodHRwczovL2RvYy5ydXN0LWxhbmcub3JnDQpodHRwczovL2dpdGh1Yi5jb20vcnVzdC1sYW5nDQpodHRwczovL3YyLnRhdXJpLmFwcA0KaHR0cHM6Ly90YXVyaS5hcHANCmh0dHBzOi8vd3d3Lmlubm9zZXR1cC5jb20NCmh0dHBzOi8vcm9sbHVwanMub3JnDQpodHRwczovL3ZpdGUuZGV2DQpodHRwczovL3JlZ2lzdHJ5Lm5wbWpzLm9yZw0KaHR0cHM6Ly9kb2NzLm5wbWpzLmNvbQ0KaHR0cHM6Ly9jbGkuZ2l0aHViLmNvbQ0KaHR0cHM6Ly9weXBpLm9yZw0KaHR0cHM6Ly9maWxlcy5weXRob25ob3N0ZWQub3JnDQpodHRwczovL2RsLmdvb2dsZS5jb20NCmh0dHBzOi8vcGFja2FnZXMubWljcm9zb2Z0LmNvbQ0KaHR0cHM6Ly9jaG9jb2xhdGV5Lm9yZw0KaHR0cHM6Ly9jb21tdW5pdHkuY2hvY29sYXRleS5vcmcNCmh0dHBzOi8vYWthLm1zDQpodHRwczovL2dpdGh1Yi5jb20vY2xvdWRmbGFyZS93b3JrZXJzLXNkaw0KaHR0cHM6Ly9leGFtcGxlLmNvbQ0KbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20vdXBkYXRhLyoNCmxhdW5jaGVyLWFwaS5henVycGlsb3QuY29tDQpsYXVuY2hlci1kb3dubG9hZC5henVycGlsb3QuY29tDQphenVycGlsb3QuY29tDQphcGkuY25iLmNvb2wNCmNuYi5jb29sDQpsYXVuY2hlci1jbG91ZGZsYXJlLWNkbi1kb3dubG9hZC5henVycGlsb3QuY29tDQoNCmh0dHBzOi8vZ2l0aHViLmNvbS9hMjg5MzAwNTc0MS9hbGFzLWxhdW5jaGVyDQpodHRwczovL2dpdGh1Yi5jb20vYTI4OTMwMDU3NDEvV2Fyc2hpcFBpbG90DQpodHRwczovL2doZmFzdC50b3ANCmh0dHBzOi8vZ2gtcHJveHkuY29tDQpodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20NCg==
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  windows:
-    runs-on: windows-latest
+  test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest, windows-11-arm]
+
     steps:
-      - uses: actions/checkout@v4
+      # 日志脱敏：注册 URL 掩码清单（明文见 tools/ci/log-mask.txt；base64 藏在
+      # 环境变量里，避免本步骤自身的日志先出现 URL）。掩码对本 job 之后的全部
+      # 日志生效；修改清单后需重新 base64 并同步两个 workflow 的所有 job。
       - name: Register log masks
-        shell: pwsh
+        shell: bash
+        env:
+          AZURPILOT_LOG_MASK_B64: "IyBDSSDml6Xlv5fmjqnnoIHmuIXljZXvvIjmmI7mlofln7rlh4bvvInjgIIKIyDmr4/kuKogam9iIOmmluatpeaKiuWug+mAkOihjOazqOWGjOS4uiA6OmFkZC1tYXNrOjrvvIxHaXRIdWIg5Lya5oqK5pel5b+X5Lit5ZG95Lit55qE5a2Q5Liy5pu/5o2i5Li6ICoqKuOAggojIOS/ruaUueWQjuaJp+ihjDogYmFzZTY0IC13MCDmnKzmlofku7bvvIjot7Pov4fms6jph4rooYzvvInvvIzmiorovpPlh7rlkIzmraXmm7/mjaIKIyAuZ2l0aHViL3dvcmtmbG93cy9wYWNrYWdlLnltbCDkuI4gdGVzdC55bWwg5Lit5omA5pyJIEFaVVJQSUxPVF9MT0dfTUFTS19CNjQg55qE5YC844CCCiMg5rOo5oSP77ya5pys5paH5Lu25LiN5Lya5Ye6546w5Zyo5pel5b+X6YeM77yI5o6p56CB5q2l6aqk5Y+q6L6T5Ye6IGFkZC1tYXNrIOWRveS7pO+8ie+8jOaUueWKqOivt+S/neaMgeavj+ihjOS4gOS4quWujOaVtOadoeebruOAgeS4jeimgeeVmeepuuihjOOAggpodHRwLmh0dHBzOi8vZ2l0aHViLmNvbS8uZXh0cmFoZWFkZXIKaHR0cHM6Ly9sYXVuY2hlci1hcGkuYXp1cnBpbG90LmNvbS91cGRhdGEvc3RhYmxlLmpzb24KaHR0cHM6Ly9sYXVuY2hlci1hcGkuYXp1cnBpbG90LmNvbQpodHRwczovL2xhdW5jaGVyLWRvd25sb2FkLmF6dXJwaWxvdC5jb20KaHR0cHM6Ly9hcGkuY25iLmNvb2wKaHR0cHM6Ly9jbmIuY29vbApodHRwczovL2dpdGh1Yi5jb20vd2VzczA5L0F6dXJQaWxvdExhdW5jaGVyCmh0dHBzOi8vZ2l0aHViLmNvbS93ZXNzMDkvQXp1clBpbG90Cmh0dHBzOi8vYXBpLmdpdGh1Yi5jb20KaHR0cHM6Ly91cGxvYWRzLmdpdGh1Yi5jb20KaHR0cHM6Ly9vYmplY3RzLmdpdGh1YnVzZXJjb250ZW50LmNvbQpodHRwczovL2RvY3MuZ2l0aHViLmNvbQpodHRwczovL2dpdGh1Yi5jb20vYXN0cmFsLXNoL3NldHVwLXV2Cmh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hc3RyYWwtc2gvc2V0dXAtdXYKaHR0cHM6Ly9naXRodWIuY29tL2FzdHJhbC1zaC91dgpodHRwczovL2FzdHJhbC5zaApodHRwczovL2dpdGh1Yi5jb20vYWN0aW9ucy9weXRob24tdmVyc2lvbnMKaHR0cHM6Ly9naXRodWIuY29tL2FjdGlvbnMvc2V0dXAtcHl0aG9uCmh0dHBzOi8vZ2l0aHViLmNvbS9hY3Rpb25zL25vZGUtdmVyc2lvbnMKaHR0cHM6Ly9zdGF0aWMucnVzdC1sYW5nLm9yZwpodHRwczovL3NoLnJ1c3R1cC5ycwpodHRwczovL2NyYXRlcy5pbwpodHRwczovL2luZGV4LmNyYXRlcy5pbwpodHRwczovL3N0YXRpYy5jcmF0ZXMuaW8KaHR0cHM6Ly9kb2MucnVzdC1sYW5nLm9yZwpodHRwczovL2dpdGh1Yi5jb20vcnVzdC1sYW5nCmh0dHBzOi8vdjIudGF1cmkuYXBwCmh0dHBzOi8vdGF1cmkuYXBwCmh0dHBzOi8vd3d3Lmlubm9zZXR1cC5jb20KaHR0cHM6Ly9yb2xsdXBqcy5vcmcKaHR0cHM6Ly92aXRlLmRldgpodHRwczovL3JlZ2lzdHJ5Lm5wbWpzLm9yZwpodHRwczovL2RvY3MubnBtanMuY29tCmh0dHBzOi8vY2xpLmdpdGh1Yi5jb20KaHR0cHM6Ly9weXBpLm9yZwpodHRwczovL2ZpbGVzLnB5dGhvbmhvc3RlZC5vcmcKaHR0cHM6Ly9kbC5nb29nbGUuY29tCmh0dHBzOi8vcGFja2FnZXMubWljcm9zb2Z0LmNvbQpodHRwczovL2Nob2NvbGF0ZXkub3JnCmh0dHBzOi8vY29tbXVuaXR5LmNob2NvbGF0ZXkub3JnCmh0dHBzOi8vYWthLm1zCmh0dHBzOi8vZ2l0aHViLmNvbS9jbG91ZGZsYXJlL3dvcmtlcnMtc2RrCmh0dHBzOi8vZXhhbXBsZS5jb20KbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20vdXBkYXRhLyoKbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20KbGF1bmNoZXItZG93bmxvYWQuYXp1cnBpbG90LmNvbQphenVycGlsb3QuY29tCmFwaS5jbmIuY29vbApjbmIuY29vbApsYXVuY2hlci1jbG91ZGZsYXJlLWNkbi1kb3dubG9hZC5henVycGlsb3QuY29tCg=="
         run: |
-          $masks=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:AZURPILOT_LOG_MASK_B64))
-          $masks -split "`n" | ForEach-Object { if ($_.Trim()) { Write-Output "::add-mask::$($_.Trim())" } }
-      - uses: actions/setup-node@v4
+          printf '%s' "$AZURPILOT_LOG_MASK_B64" | openssl base64 -d -A | while IFS= read -r value; do
+            if [ -n "$value" ]; then echo "::add-mask::$value"; fi
+          done
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Verify launcher
-        shell: pwsh
+
+      - name: Install launcher UI dependencies
+        shell: bash
         run: |
-          npm.cmd --prefix frontend ci 2>&1 | ForEach-Object { "$_" -replace 'https?://\S+', '<URL>' }
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm.cmd --prefix frontend test
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm.cmd --prefix frontend run build
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m unittest discover -s tools -p "test_*.py"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo check --locked --all-targets
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo test --locked --all-targets
-          exit $LASTEXITCODE
+          set -o pipefail
+          npm --prefix frontend ci 2>&1 | bash tools/ci/redact-urls.sh
+
+      - name: Test launcher UI
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --prefix frontend test 2>&1 | bash tools/ci/redact-urls.sh
+
+      - name: Build launcher UI
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --prefix frontend run build 2>&1 | bash tools/ci/redact-urls.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Test component packaging and stable.json merging
+        run: python -m unittest discover -s tools -p "test_*.py"
+
+      - name: Install Tauri dependencies (Ubuntu only)
+        if: runner.os == 'Linux'
+        run: |
+          set -o pipefail
+          {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              build-essential pkg-config libwebkit2gtk-4.1-dev libxdo-dev \
+              libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          } 2>&1 | bash tools/ci/redact-urls.sh
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-${{ matrix.os }}-${{ runner.arch }}
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Tests use build.rs placeholders for uv and mTLS; no release secrets needed.
+      - name: Check all targets
+        run: cargo check --locked --all-targets
+
+      - name: Check embedded launcher assets
+        run: cargo check --locked --all-targets --features custom-protocol
+
+      # GitHub-hosted Windows runners run as administrators, as required by
+      # the launcher manifest and protected Node.js installer directory tests.
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+  worker:
+    name: Validate Cloudflare Worker (static assets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # 日志脱敏：注册 URL 掩码清单（明文见 tools/ci/log-mask.txt；base64 藏在
+      # 环境变量里，避免本步骤自身的日志先出现 URL）。掩码对本 job 之后的全部
+      # 日志生效；修改清单后需重新 base64 并同步两个 workflow 的所有 job。
+      - name: Register log masks
+        shell: bash
+        env:
+          AZURPILOT_LOG_MASK_B64: "IyBDSSDml6Xlv5fmjqnnoIHmuIXljZXvvIjmmI7mlofln7rlh4bvvInjgIIKIyDmr4/kuKogam9iIOmmluatpeaKiuWug+mAkOihjOazqOWGjOS4uiA6OmFkZC1tYXNrOjrvvIxHaXRIdWIg5Lya5oqK5pel5b+X5Lit5ZG95Lit55qE5a2Q5Liy5pu/5o2i5Li6ICoqKuOAggojIOS/ruaUueWQjuaJp+ihjDogYmFzZTY0IC13MCDmnKzmlofku7bvvIjot7Pov4fms6jph4rooYzvvInvvIzmiorovpPlh7rlkIzmraXmm7/mjaIKIyAuZ2l0aHViL3dvcmtmbG93cy9wYWNrYWdlLnltbCDkuI4gdGVzdC55bWwg5Lit5omA5pyJIEFaVVJQSUxPVF9MT0dfTUFTS19CNjQg55qE5YC844CCCiMg5rOo5oSP77ya5pys5paH5Lu25LiN5Lya5Ye6546w5Zyo5pel5b+X6YeM77yI5o6p56CB5q2l6aqk5Y+q6L6T5Ye6IGFkZC1tYXNrIOWRveS7pO+8ie+8jOaUueWKqOivt+S/neaMgeavj+ihjOS4gOS4quWujOaVtOadoeebruOAgeS4jeimgeeVmeepuuihjOOAggpodHRwLmh0dHBzOi8vZ2l0aHViLmNvbS8uZXh0cmFoZWFkZXIKaHR0cHM6Ly9sYXVuY2hlci1hcGkuYXp1cnBpbG90LmNvbS91cGRhdGEvc3RhYmxlLmpzb24KaHR0cHM6Ly9sYXVuY2hlci1hcGkuYXp1cnBpbG90LmNvbQpodHRwczovL2xhdW5jaGVyLWRvd25sb2FkLmF6dXJwaWxvdC5jb20KaHR0cHM6Ly9hcGkuY25iLmNvb2wKaHR0cHM6Ly9jbmIuY29vbApodHRwczovL2dpdGh1Yi5jb20vd2VzczA5L0F6dXJQaWxvdExhdW5jaGVyCmh0dHBzOi8vZ2l0aHViLmNvbS93ZXNzMDkvQXp1clBpbG90Cmh0dHBzOi8vYXBpLmdpdGh1Yi5jb20KaHR0cHM6Ly91cGxvYWRzLmdpdGh1Yi5jb20KaHR0cHM6Ly9vYmplY3RzLmdpdGh1YnVzZXJjb250ZW50LmNvbQpodHRwczovL2RvY3MuZ2l0aHViLmNvbQpodHRwczovL2dpdGh1Yi5jb20vYXN0cmFsLXNoL3NldHVwLXV2Cmh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hc3RyYWwtc2gvc2V0dXAtdXYKaHR0cHM6Ly9naXRodWIuY29tL2FzdHJhbC1zaC91dgpodHRwczovL2FzdHJhbC5zaApodHRwczovL2dpdGh1Yi5jb20vYWN0aW9ucy9weXRob24tdmVyc2lvbnMKaHR0cHM6Ly9naXRodWIuY29tL2FjdGlvbnMvc2V0dXAtcHl0aG9uCmh0dHBzOi8vZ2l0aHViLmNvbS9hY3Rpb25zL25vZGUtdmVyc2lvbnMKaHR0cHM6Ly9zdGF0aWMucnVzdC1sYW5nLm9yZwpodHRwczovL3NoLnJ1c3R1cC5ycwpodHRwczovL2NyYXRlcy5pbwpodHRwczovL2luZGV4LmNyYXRlcy5pbwpodHRwczovL3N0YXRpYy5jcmF0ZXMuaW8KaHR0cHM6Ly9kb2MucnVzdC1sYW5nLm9yZwpodHRwczovL2dpdGh1Yi5jb20vcnVzdC1sYW5nCmh0dHBzOi8vdjIudGF1cmkuYXBwCmh0dHBzOi8vdGF1cmkuYXBwCmh0dHBzOi8vd3d3Lmlubm9zZXR1cC5jb20KaHR0cHM6Ly9yb2xsdXBqcy5vcmcKaHR0cHM6Ly92aXRlLmRldgpodHRwczovL3JlZ2lzdHJ5Lm5wbWpzLm9yZwpodHRwczovL2RvY3MubnBtanMuY29tCmh0dHBzOi8vY2xpLmdpdGh1Yi5jb20KaHR0cHM6Ly9weXBpLm9yZwpodHRwczovL2ZpbGVzLnB5dGhvbmhvc3RlZC5vcmcKaHR0cHM6Ly9kbC5nb29nbGUuY29tCmh0dHBzOi8vcGFja2FnZXMubWljcm9zb2Z0LmNvbQpodHRwczovL2Nob2NvbGF0ZXkub3JnCmh0dHBzOi8vY29tbXVuaXR5LmNob2NvbGF0ZXkub3JnCmh0dHBzOi8vYWthLm1zCmh0dHBzOi8vZ2l0aHViLmNvbS9jbG91ZGZsYXJlL3dvcmtlcnMtc2RrCmh0dHBzOi8vZXhhbXBsZS5jb20KbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20vdXBkYXRhLyoKbGF1bmNoZXItYXBpLmF6dXJwaWxvdC5jb20KbGF1bmNoZXItZG93bmxvYWQuYXp1cnBpbG90LmNvbQphenVycGlsb3QuY29tCmFwaS5jbmIuY29vbApjbmIuY29vbApsYXVuY2hlci1jbG91ZGZsYXJlLWNkbi1kb3dubG9hZC5henVycGlsb3QuY29tCg=="
+        run: |
+          printf '%s' "$AZURPILOT_LOG_MASK_B64" | openssl base64 -d -A | while IFS= read -r value; do
+            if [ -n "$value" ]; then echo "::add-mask::$value"; fi
+          done
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Release builds generate the real manifest; this throwaway one only
+      # validates the Worker config. deploy.sh also rejects any `main` entry.
+      - name: Prepare dummy manifest
+        run: |
+          mkdir -p cf-worker/public/updata
+          printf '%s\n' '{"version":"0.0.0-ci","platforms":{"ci":{"url":"https://example.com","sha256":"0"}}}' > cf-worker/public/updata/stable.json
+
+      - name: Validate static-only Worker config
+        env:
+          WRANGLER_VERSION: "4.151.1"
+        run: bash cf-worker/deploy.sh --dry-run

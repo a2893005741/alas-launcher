@@ -1,7 +1,5 @@
 //! 单条本机 WS 承载命令、通知、状态和免密票据；不使用系统代理。
-use crate::launcher_protocol::{
-    valid_commit, valid_id, valid_ticket, AutostartParams, BackendUpdateParams, Incoming,
-};
+use crate::launcher_protocol::{valid_id, valid_ticket, AutostartParams, Incoming};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::{
@@ -21,10 +19,6 @@ use tungstenite::{client::IntoClientRequest, protocol::WebSocketConfig, Message,
 pub trait ChannelHandler: Send + Sync + 'static {
     fn autostart(&self, enabled: Option<bool>) -> Result<Value>;
     fn notification(&self, data: Value) -> Result<()>;
-    fn backend_update(&self, _target: String) -> Result<Value> {
-        bail!("backend updates unsupported")
-    }
-    fn update_response_sent(&self) {}
 }
 
 struct Outgoing {
@@ -178,9 +172,9 @@ fn run_connection(
         .autostart(None)
         .unwrap_or(json!({"supported":false,"enabled":null}));
     let capabilities = if state["supported"] == true {
-        vec!["autostart", "notifications", "login", "backend.update"]
+        vec!["autostart", "notifications", "login"]
     } else {
-        vec!["notifications", "login", "backend.update"]
+        vec!["notifications", "login"]
     };
     let platform = if cfg!(windows) {
         "win32"
@@ -333,10 +327,6 @@ fn run_connection(
                                 execute(handler, &id, &method, params)
                             };
                             send(&mut socket, response.clone())?;
-                            if method == "backend.update" && response["ok"] == true {
-                                socket.flush()?;
-                                handler.update_response_sent();
-                            }
                             completed.push_back((id, fingerprint, response));
                             if completed.len() > 128 {
                                 completed.pop_front();
@@ -383,10 +373,6 @@ fn run_connection(
 
 fn execute(handler: &dyn ChannelHandler, id: &str, method: &str, params: Value) -> Value {
     let result = match method {
-        "backend.update" => match serde_json::from_value::<BackendUpdateParams>(params) {
-            Ok(params) if valid_commit(&params.target) => handler.backend_update(params.target),
-            _ => return failure(id, "INVALID_PARAMS", "target must be a full commit SHA"),
-        },
         "autostart.get" if params == json!({}) => handler.autostart(None),
         "autostart.set" => match serde_json::from_value::<AutostartParams>(params) {
             Ok(params) => handler.autostart(Some(params.enabled)),
@@ -397,9 +383,10 @@ fn execute(handler: &dyn ChannelHandler, id: &str, method: &str, params: Value) 
     };
     match result {
         Ok(result) => json!({"type":"response","id":id,"ok":true,"result":result}),
-        Err(error) => {
-            warn!("Launcher command {method} rejected: {error:#}");
-            failure(id, "COMMAND_FAILED", "launcher command failed")
-        }
+        Err(_) => failure(
+            id,
+            "AUTOSTART_FAILED",
+            "unable to change or query autostart",
+        ),
     }
 }

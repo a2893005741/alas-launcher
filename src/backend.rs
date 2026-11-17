@@ -76,36 +76,103 @@ pub(crate) fn is_backend_startup_timeout(error: &anyhow::Error) -> bool {
 /// 负责翻译成实际的参数列表。
 #[derive(Clone, Debug)]
 pub struct WebuiLaunchConfig {
+    /// WebUI 监听地址，默认 `127.0.0.1`，仅允许本机访问。
     pub host: String,
+    /// WebUI 监听端口，默认 22267，与 AzurPilot 上游约定一致。
     pub port: u16,
+    /// WebUI 访问密码；缺失时后端以无密码模式运行。
+    pub password: Option<String>,
+    /// 是否启用 CDN 加速静态资源加载。
+    pub cdn: bool,
+    /// HTTPS 私钥路径；与 `ssl_cert` 成对配置时以 HTTPS 启动。
+    pub ssl_key: Option<String>,
+    /// HTTPS 证书路径。
+    pub ssl_cert: Option<String>,
+    /// 启动后立即执行的 AzurPilot 任务名列表，经 `--run` 透传给 gui.py。
+    pub run: Vec<String>,
 }
+
+/// `WebuiLaunchConfig` 的构造与命令行翻译逻辑。
 impl WebuiLaunchConfig {
+    /// 从 AzurPilot 的 deploy 配置中提取 WebUI 参数。
+    ///
+    /// `config` 为 `None` 或缺少 `Deploy.Webui` 节点时，各字段独立回退到
+    /// 默认值，因此即使配置部分损坏也能以保守默认值启动后端。
     pub fn from_deploy_config(config: Option<&JsonValue>) -> Self {
-        let webui = config.and_then(|c| c.get("WebUI"));
+        // 配置路径固定为 config["Deploy"]["Webui"]，任一层缺失都会得到 None；
+        // 之后每个字段独立判空并回退默认值，保证部分缺失的配置仍可启动。
+        let webui = config
+            .and_then(|config| config.get("Deploy"))
+            .and_then(|deploy| deploy.get("Webui"));
+
         Self {
             host: webui
-                .and_then(|w| w.get("Host"))
+                .and_then(|webui| webui.get("WebuiHost"))
                 .and_then(value_as_string)
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "0.0.0.0".into()),
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "127.0.0.1".to_owned()),
             port: webui
-                .and_then(|w| w.get("Port"))
+                .and_then(|webui| webui.get("WebuiPort"))
                 .and_then(value_as_u16)
-                .filter(|p| *p > 0)
-                .unwrap_or(22680),
+                .unwrap_or(22267),
+            password: webui
+                .and_then(|webui| webui.get("Password"))
+                .and_then(value_as_string)
+                .filter(|value| !value.trim().is_empty()),
+            cdn: webui
+                .and_then(|webui| webui.get("CDN"))
+                .and_then(value_as_bool)
+                .unwrap_or(false),
+            ssl_key: webui
+                .and_then(|webui| webui.get("WebuiSSLKey"))
+                .and_then(value_as_string)
+                .filter(|value| !value.trim().is_empty()),
+            ssl_cert: webui
+                .and_then(|webui| webui.get("WebuiSSLCert"))
+                .and_then(value_as_string)
+                .filter(|value| !value.trim().is_empty()),
+            run: webui
+                .and_then(|webui| webui.get("Run"))
+                .map(value_as_string_list)
+                .unwrap_or_default(),
         }
     }
+
+    /// 把配置翻译为传给 Python 解释器的 gui.py 参数列表（不含解释器本身）。
+    ///
+    /// `--host`/`--port` 恒定存在；其余开关仅在对应字段有值时追加，
+    /// 保证未配置的选项不会以空值形式传给后端。
     fn args(&self) -> Vec<String> {
-        vec![
-            azurpilot_repo_dir().join("gui.py").display().to_string(),
-            "--root".into(),
-            azurpilot_repo_dir().display().to_string(),
-            "--host".into(),
+        // 基础参数：gui.py 入口与监听地址、端口，决定 WebUI 的访问位置。
+        let mut args = vec![
+            "gui.py".to_owned(),
+            "--host".to_owned(),
             self.host.clone(),
-            "--port".into(),
+            "--port".to_owned(),
             self.port.to_string(),
-            "--no-browser".into(),
-        ]
+        ];
+
+        if let Some(password) = &self.password {
+            args.push("--key".to_owned());
+            args.push(password.clone());
+        }
+        if self.cdn {
+            args.push("--cdn".to_owned());
+        }
+        if let Some(ssl_key) = &self.ssl_key {
+            args.push("--ssl-key".to_owned());
+            args.push(ssl_key.clone());
+        }
+        if let Some(ssl_cert) = &self.ssl_cert {
+            args.push("--ssl-cert".to_owned());
+            args.push(ssl_cert.clone());
+        }
+        if !self.run.is_empty() {
+            args.push("--run".to_owned());
+            args.extend(self.run.iter().cloned());
+        }
+
+        args
     }
 }
 
@@ -200,9 +267,7 @@ impl ManagedBackend {
 
         // 使用仓库 venv 内的 Python 解释器，避免依赖系统全局 Python 环境。
         let mut command = Command::new(venv_python());
-        command
-            .args(config.args())
-            .current_dir(azurpilot_repo_dir());
+        command.args(config.args());
         // 同时注入 AP / ALAS 的归属标记与信任密钥，兼容新旧 Python 后端。
         backend_env::configure(&mut command, std::process::id(), launcher_trust_secret());
         isolate_python_child_environment(&mut command);
@@ -223,41 +288,7 @@ impl ManagedBackend {
         while start_time.elapsed() < BACKEND_STARTUP_TIMEOUT {
             crate::launcher::ensure_not_cancelled(cancel)?;
             if TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok() {
-                let client = reqwest::blocking::Client::builder()
-                    .no_proxy()
-                    .timeout(Duration::from_secs(2))
-                    .build()?;
-                if let Ok(response) = client
-                    .get(format!("http://127.0.0.1:{}/health", config.port))
-                    .send()
-                {
-                    if let Ok(body) = response.text() {
-                        if let Ok(health) = serde_json::from_str::<JsonValue>(&body) {
-                            #[cfg(windows)]
-                            let owned = health["pid"]
-                                .as_u64()
-                                .and_then(|p| u32::try_from(p).ok())
-                                .is_some_and(|pid| {
-                                    res.child.as_ref().is_some_and(|c| c.owns_pid(pid))
-                                });
-                            #[cfg(unix)]
-                            let owned = health["pid"].as_u64()
-                                == res.child.as_ref().map(|c| u64::from(c.inner().id()));
-                            let root = azurpilot_repo_dir();
-                            let expected = fs_commit(&root);
-                            if health["product"] == "WarshipPilot"
-                                && owned
-                                && health["commit"].as_str() == expected.as_deref()
-                                && health["root"].as_str().is_some_and(|r| {
-                                    Path::new(r).canonicalize().ok() == root.canonicalize().ok()
-                                })
-                            {
-                                crate::warship::commit(cancel)?;
-                                return Ok(res);
-                            }
-                        }
-                    }
-                }
+                return Ok(res);
             }
             // 端口未就绪但子进程已退出时立即报错，避免傻等满超时。
             if let Some(child) = res.child.as_mut() {
@@ -358,10 +389,10 @@ fn kill_processes_using_port(port: u16) -> Result<()> {
         match sys.process(sys_pid) {
             Some(process) => {
                 let proc_name = process.name().to_string_lossy().to_lowercase();
-                let _ = proc_name;
+                let is_python_or_uv = proc_name.contains("python") || proc_name.contains("uv");
                 let is_managed = backend_env::is_managed_child(process.environ(), current_pid);
 
-                if is_managed {
+                if is_managed || is_python_or_uv {
                     info!(
                         "Killing managed/runtime process {} ({}) using configured WebUI port {}",
                         pid,
@@ -622,34 +653,78 @@ fn extract_failure_reason(log_tail: &str) -> Option<String> {
         .filter(|reason| !reason.is_empty())
 }
 
-fn fs_commit(root: &Path) -> Option<String> {
-    let git = crate::components::available_tool(root, "git")?;
-    let out = Command::new(git)
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "HEAD"])
-        .create_no_window()
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 启动超时阈值应为 5 分钟，覆盖依赖同步等慢启动场景。
     #[test]
-    fn warship_configuration_and_arguments() {
-        let config = WebuiLaunchConfig::from_deploy_config(Some(
-            &serde_json::json!({"WebUI":{"Host":"127.0.0.1","Port":23100}}),
-        ));
-        assert_eq!(config.port, 23100);
-        assert_eq!(config.host, "127.0.0.1");
-        let args = config.args();
-        assert!(args.contains(&"--root".to_string()));
-        assert!(args.contains(&"--no-browser".to_string()));
-        assert!(!args.contains(&"--key".to_string()));
-        assert_eq!(WebuiLaunchConfig::from_deploy_config(None).port, 22680);
+    fn backend_startup_timeout_is_five_minutes() {
+        assert_eq!(BACKEND_STARTUP_TIMEOUT, Duration::from_secs(5 * 60));
+    }
+
+    /// 超时错误可被精确识别，且不会误判其他 `anyhow` 错误。
+    #[test]
+    fn backend_startup_timeout_is_identified_without_matching_other_errors() {
+        let timeout: anyhow::Error = BackendStartupTimeout { port: 22267 }.into();
+
+        assert!(is_backend_startup_timeout(&timeout));
+        assert!(!is_backend_startup_timeout(&anyhow!("other startup error")));
+    }
+    /// 能从真实格式的 gui 日志行中提取失败原因。
+    #[test]
+    fn failure_reason_is_extracted_from_a_real_gui_log_line() {
+        // 与 rich 日志实际落盘格式一致：时间 | 级别 | 消息
+        let line = format!(
+            "2026-09-21 20:14:40.595 | ERROR | {BACKEND_FAILURE_LOG_MARKER}React 前端构建失败\r"
+        );
+
+        assert_eq!(
+            extract_failure_reason(&line).as_deref(),
+            Some("React 前端构建失败")
+        );
+    }
+
+    /// 多条失败记录并存时取最后一次（最新）的原因。
+    #[test]
+    fn failure_reason_uses_the_last_recorded_failure() {
+        let tail =
+            format!("{BACKEND_FAILURE_LOG_MARKER}旧原因\n{BACKEND_FAILURE_LOG_MARKER}新原因\n");
+
+        assert_eq!(extract_failure_reason(&tail).as_deref(), Some("新原因"));
+    }
+
+    /// 无标记行、或标记后原因为空时，均不产生失败原因。
+    #[test]
+    fn failure_reason_is_absent_without_the_marker() {
+        assert!(extract_failure_reason("2026-09-21 20:14:40 | INFO | 普通日志\n").is_none());
+        // 标记出现但原因为空时同样不作为原因
+        assert!(extract_failure_reason(&format!("{BACKEND_FAILURE_LOG_MARKER}\n")).is_none());
+    }
+
+    /// 从文件中部回溯读取后，落在多字节字符中间的不完整首行应被丢弃。
+    #[test]
+    fn log_tail_drops_the_incomplete_first_line_after_seeking() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("2026-09-21_gui.txt");
+        // 超过读取上限，迫使实现从文件中部定位
+        let mut content = "x".repeat(BACKEND_FAILURE_LOG_TAIL_BYTES as usize + 64);
+        content.push_str("\n第一行完整\n");
+        content.push_str(&format!("{BACKEND_FAILURE_LOG_MARKER}依赖同步失败\n"));
+        std::fs::write(&path, content).expect("write log");
+
+        let tail = read_log_tail(&path).expect("tail");
+
+        assert!(!tail.starts_with("xxxx"), "首行应从字符边界之后开始");
+        assert_eq!(
+            extract_failure_reason(&tail).as_deref(),
+            Some("依赖同步失败")
+        );
+    }
+
+    /// 日志文件不存在时返回 `None` 而非报错。
+    #[test]
+    fn log_tail_is_absent_for_a_missing_file() {
+        assert!(read_log_tail(Path::new("does-not-exist_gui.txt")).is_none());
     }
 }
