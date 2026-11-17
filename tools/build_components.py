@@ -19,19 +19,15 @@ from pathlib import Path
 
 IDS = ('git', 'adb')
 SCHEMA = 2
-CNB_BASE = 'https://cnb.cool/AzurPilot/AzurPilotLauncher/-/releases/download/1.0.0'
-GITHUB_BASE = 'https://github.com/wess09/AzurPilotLauncher/releases/download/runtime'
+CNB_BASE = 'https://ghfast.top/https://github.com/a2893005741/alas-launcher/releases/download/runtime'
+GITHUB_BASE = 'https://github.com/a2893005741/alas-launcher/releases/download/runtime'
 # deploy 引导脚本直接从仓库 master raw 下载，跟随最新提交，不锁定版本。
 DEPLOY_RAW_BASES = [
-    'https://cnb.cool/AzurPilot/AzurPilot/-/git/raw/master',
-    'https://raw.githubusercontent.com/wess09/AzurPilot/master',
+    'https://ghfast.top/https://raw.githubusercontent.com/a2893005741/WarshipPilot/{revision}',
+    'https://raw.githubusercontent.com/a2893005741/WarshipPilot/{revision}',
 ]
-DEPLOY_TEMPLATES = (
-    'config/deploy.template.yaml',
-    'config/deploy.template-cn.yaml',
-    'config/deploy.template-linux.yaml',
-    'config/deploy.template-linux-cn.yaml',
-)
+DEPLOY_TEMPLATES = ('config/deploy.template.yaml',)
+
 
 
 def run(*args, cwd=None):
@@ -107,20 +103,20 @@ def git_component_files(stage, platform):
                 destination = extracted / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(package.read(info))
-        return list(tree(extracted, '.azurpilot/tools/git'))
+        return list(tree(extracted, '.warship/tools/git'))
 
     exec_path = Path(run('git', '--exec-path'))
     tool_root = exec_path.parent.parent
     git_bin = tool_root / 'bin' / 'git'
     if not git_bin.is_file():
         git_bin = Path(shutil.which('git'))
-    files = [(git_bin, '.azurpilot/tools/git/bin/git')]
-    files.extend(tree(exec_path, '.azurpilot/tools/git/libexec/git-core'))
+    files = [(git_bin, '.warship/tools/git/bin/git')]
+    files.extend(tree(exec_path, '.warship/tools/git/libexec/git-core'))
     templates = tool_root / 'share' / 'git-core' / 'templates'
     if not templates.is_dir():
         templates = Path('/usr/share/git-core/templates')
     if templates.is_dir():
-        files.extend(tree(templates, '.azurpilot/tools/git/share/git-core/templates'))
+        files.extend(tree(templates, '.warship/tools/git/share/git-core/templates'))
     return files
 
 
@@ -148,20 +144,12 @@ def adb_component_files(stage, platform):
                 destination.chmod(0o755 if basename in ('adb', 'adb.exe') else 0o644)
     if not (adb / ('adb.exe' if windows else 'adb')).is_file():
         raise RuntimeError('Android platform-tools archive has no adb executable')
-    return list(tree(adb, '.azurpilot/tools/adb'))
+    return list(tree(adb, '.warship/tools/adb'))
 
 
 def deploy_files(source):
-    """列出 deploy 部署脚本与分系统模板；config 下的 json 一律不列。"""
     names = run('git', 'ls-files', '-z', cwd=source).split('\0')
-    files = [
-        name for name in names
-        if name.startswith('deploy/')
-        and '__pycache__' not in Path(name).parts
-        and not name.endswith('.pyc')
-    ]
-    files.extend(template for template in DEPLOY_TEMPLATES if (source / template).is_file())
-    return sorted(files)
+    return sorted(name for name in ('deploy/launcher.py', *DEPLOY_TEMPLATES) if name in names)
 
 
 def verify_relocated(output, platform):
@@ -178,22 +166,24 @@ def verify_relocated(output, platform):
     env = dict(os.environ)
     env.pop('GIT_EXEC_PATH', None)
     if platform.startswith('windows-'):
-        git = relocated / '.azurpilot/tools/git/cmd/git.exe'
-        adb = relocated / '.azurpilot/tools/adb/adb.exe'
+        git = relocated / '.warship/tools/git/cmd/git.exe'
+        adb = relocated / '.warship/tools/adb/adb.exe'
     else:
-        git = relocated / '.azurpilot/tools/git/bin/git'
-        adb = relocated / '.azurpilot/tools/adb/adb'
-        env['GIT_EXEC_PATH'] = str(relocated / '.azurpilot/tools/git/libexec/git-core')
-        env['GIT_TEMPLATE_DIR'] = str(relocated / '.azurpilot/tools/git/share/git-core/templates')
+        git = relocated / '.warship/tools/git/bin/git'
+        adb = relocated / '.warship/tools/adb/adb'
+        env['GIT_EXEC_PATH'] = str(relocated / '.warship/tools/git/libexec/git-core')
+        env['GIT_TEMPLATE_DIR'] = str(relocated / '.warship/tools/git/share/git-core/templates')
     subprocess.run([str(git), '--version'], check=True, env=env)
     subprocess.run([str(adb), 'version'], check=True, env=env)
 
 
 def build(source, output, platform):
+    if platform != 'windows-x86_64':
+        raise ValueError('舰R助手仅发布 Windows x64')
     revision = run('git', 'rev-parse', 'HEAD', cwd=source)
     files = deploy_files(source)
-    if 'deploy/installer.py' not in files:
-        raise RuntimeError('后端缺少 deploy/installer.py')
+    if 'deploy/launcher.py' not in files:
+        raise RuntimeError('后端缺少 deploy/launcher.py')
     if not any(name in files for name in DEPLOY_TEMPLATES):
         raise RuntimeError('后端缺少 config/deploy.template*.yaml 模板')
     with tempfile.TemporaryDirectory(prefix='azurpilot-components-') as temporary:
@@ -207,7 +197,8 @@ def build(source, output, platform):
         'schema': SCHEMA,
         'revision': revision,
         'platforms': {platform: records},
-        'deploy': {'bases': list(DEPLOY_RAW_BASES), 'files': files},
+        'deploy': {'bases': [base.format(revision=revision) for base in DEPLOY_RAW_BASES], 'files': files,
+                   'hashes': {name: hashlib.sha256(subprocess.check_output(['git', '-C', str(source), 'show', f'{revision}:{name}'])).hexdigest() for name in files}},
     }
     (output / f'{platform}.json').write_text(json.dumps(fragment, indent=2), encoding='utf-8')
 
@@ -227,7 +218,7 @@ def merge(directory, output):
             for component in components:
                 verify_artifact(directory, component)
             merged['platforms'][platform] = components
-    required_platforms = {'linux-x86_64', 'windows-x86_64', 'macos-aarch64'}
+    required_platforms = {'windows-x86_64'}
     if merged is None or set(merged['platforms']) != required_platforms:
         raise RuntimeError('Incomplete platform matrix; refusing to publish')
     output.write_text(json.dumps(merged, indent=2), encoding='utf-8')

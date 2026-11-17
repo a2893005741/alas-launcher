@@ -370,7 +370,7 @@ mod tests {
 fn database_path() -> Result<PathBuf> {
     let base = dirs::data_dir()
         .ok_or_else(|| anyhow!("Unable to resolve the application data directory"))?;
-    Ok(base.join("AzurPilot").join("launcher.db"))
+    Ok(base.join("WarshipPilot").join("launcher.db"))
 }
 
 /// Tauri 命令：读取全部设置。

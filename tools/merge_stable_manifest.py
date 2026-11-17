@@ -35,7 +35,7 @@ def merge(current, *, launcher=None, runtime=None, canary=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--current-url', default='https://launcher-api.azurpilot.com/updata/stable.json')
+    parser.add_argument('--current-url', default='https://github.com/a2893005741/alas-launcher/releases/download/manifest/stable.json')
     parser.add_argument('--launcher', type=Path)
     parser.add_argument('--canary', type=Path)
     parser.add_argument('--runtime', type=Path)

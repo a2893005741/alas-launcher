@@ -1,3 +1,8 @@
+# 当前 fork：舰R助手 Windows x64
+
+当前契约、构建、分发和迁移以 README.md、src/warship.rs 和相邻 WarshipPilot/docs/warship-launcher-plan.md 为准。
+下方保留上游架构作为合并参照；其中 deploy.app、Node.js、AzurPilot 配置、CNB/R2 和多平台发布不适用于本 fork。
+
 # CLAUDE.md
 
 本文件为 Claude Code (claude.ai/code) 在本仓库中工作时提供指引。

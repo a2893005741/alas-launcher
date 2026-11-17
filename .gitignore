@@ -26,3 +26,15 @@ AzurLaneAutoScript.app/
 
 # 本地多 AI 协作登记，不入库。
 交流.txt
+
+/.cargo/config.toml
+/*-check.log
+/*-tests.log
+/*-build.log
+/dependency-download.log
+/package-root/
+/WarshipPilot-*.zip
+
+/build-*.log
+/release/
+/backend/

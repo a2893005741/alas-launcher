@@ -97,6 +97,31 @@ impl BackendChild {
         Ok(Self { child, job })
     }
 
+    pub(crate) fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    pub(crate) fn owns_pid(&self, pid: u32) -> bool {
+        use winapi::um::{
+            jobapi::IsProcessInJob, processthreadsapi::OpenProcess,
+            winnt::PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if raw.is_null() {
+            return false;
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(raw as _) };
+        let mut member = 0;
+        unsafe {
+            IsProcessInJob(
+                process.as_raw_handle() as _,
+                self.job.as_raw_handle() as _,
+                &mut member,
+            ) != 0
+                && member != 0
+        }
+    }
+
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }
@@ -291,6 +316,8 @@ mod tests {
         let mut command = fixture_command("backend", dir.path());
         crate::backend_env::configure(&mut command, std::process::id(), "test-secret");
         let mut child = BackendChild::spawn(&mut command).unwrap();
+        assert!(child.owns_pid(child.id()));
+        assert!(!child.owns_pid(std::process::id()));
         let root = TestProcess::open(dir.path(), "backend");
         let worker = TestProcess::open(dir.path(), "worker");
         let emulator = TestProcess::open(dir.path(), "emulator");

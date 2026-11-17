@@ -30,7 +30,6 @@ type SourceLabel = "download" | "python" | "nodejs" | "pypi" | "hint" | "auto" |
 const sourceGroups = [
   { field: "downloadSource", label: "download", options: ["auto", "cnb", "github"] },
   { field: "pythonSource", label: "python", options: ["auto", "nju", "ustc", "npmmirror", "aliyun", "cnb", "astral"] },
-  { field: "nodejsSource", label: "nodejs", options: ["auto", "npmmirror", "nju", "official"] },
   { field: "pypiSource", label: "pypi", options: ["auto", "pypi", "tsinghua", "ustc", "aliyun", "tencent", "huawei", "nju"] },
 ] as const;
 
@@ -199,7 +198,7 @@ export function SettingsDialog({
                     }
                   >
                     <Option value="stable">{channelStableLabel}</Option>
-                    <Option value="canary">{channelCanaryLabel}</Option>
+
                   </Dropdown>
                 </Field>
                 <Field label={updateSourceLabel}>
@@ -277,12 +276,7 @@ export function SettingsDialog({
                   label={preventSleepLabel}
                   onChange={(_e, data) => void update({ preventSleep: data.checked })}
                 />
-                <Switch
-                  disabled={saving}
-                  checked={settings.audioEnabled}
-                  label={audioEnabledLabel}
-                  onChange={(_e, data) => void update({ audioEnabled: data.checked })}
-                />
+
               </div>
             )}
           </DialogContent>

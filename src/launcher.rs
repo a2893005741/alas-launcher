@@ -62,6 +62,7 @@ pub(crate) enum Operation {
     Start,
     Stop,
     Repair,
+    BackendUpdate,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -161,7 +162,7 @@ impl Model {
             Operation::Start => view.can_start,
             Operation::Deploy => view.can_deploy,
             Operation::Repair => view.can_repair,
-            Operation::Stop => view.can_stop,
+            Operation::Stop | Operation::BackendUpdate => view.can_stop,
         };
         if !allowed {
             bail!(t!("launcher.busy"));
@@ -178,6 +179,7 @@ impl Model {
             Operation::Deploy => Phase::Deploying,
             Operation::Stop => Phase::Stopping,
             Operation::Repair => Phase::Repairing,
+            Operation::BackendUpdate => Phase::Updating,
         };
         self.view.operation = Some(operation);
         self.view.progress = None;
@@ -246,9 +248,50 @@ struct Session {
 struct NativeChannelHandler {
     app: tauri::AppHandle,
     on_click: NotificationClickHandler,
+    pending_update: Mutex<Option<String>>,
 }
 
 impl ChannelHandler for NativeChannelHandler {
+    fn backend_update(&self, target: String) -> Result<serde_json::Value> {
+        let controller = self.app.state::<Arc<Launcher>>();
+        let mut view = controller.snapshot();
+        // The backend may finish its WS handshake before the startup task has
+        // finished publishing component readiness. Wait for that task to release
+        // its slot; do not reject a valid command from the new backend.
+        if view.phase == Phase::Starting && view.backend_running {
+            let model = controller.lock_model();
+            let (model, _) = controller
+                .changed
+                .wait_timeout_while(model, Duration::from_secs(8), |m| {
+                    m.active && m.view.phase == Phase::Starting && !m.exiting
+                })
+                .unwrap_or_else(|p| p.into_inner());
+            view = model.snapshot();
+        }
+        if !view.can_stop {
+            bail!(
+                "启动器正忙：phase={:?}, operation={:?}, running={}",
+                view.phase,
+                view.operation,
+                view.backend_running
+            );
+        }
+        let mut pending = self.pending_update.lock().unwrap();
+        if pending.is_some() {
+            bail!("更新已排队");
+        }
+        *pending = Some(target);
+        Ok(serde_json::json!({"accepted":true}))
+    }
+    fn update_response_sent(&self) {
+        if let Some(target) = self.pending_update.lock().unwrap().take() {
+            let controller = self.app.state::<Arc<Launcher>>().inner().clone();
+            if let Err(error) = controller.update_backend(target) {
+                warn!("后台更新无法开始：{error:#}");
+            }
+        }
+    }
+
     fn autostart(&self, enabled: Option<bool>) -> Result<serde_json::Value> {
         let state = match enabled {
             Some(enabled) => crate::autostart::set_enabled(enabled)?,
@@ -520,6 +563,54 @@ impl Launcher {
         Ok(())
     }
 
+    fn update_backend(self: &Arc<Self>, target: String) -> Result<()> {
+        let (task, cancel) = self.begin(Operation::BackendUpdate)?;
+        let controller = self.clone();
+        thread::spawn(move || {
+            let result = (|| -> Result<()> {
+                let _ = show_launcher_home(&controller.app);
+                controller.stop_backend()?;
+                controller.change(|m| {
+                    m.view.backend_running = false;
+                    m.touch();
+                });
+                let updated = crate::warship::update_to(&target, &cancel);
+                if let Err(error) = &updated {
+                    warn!("后台更新失败，尝试恢复原版本：{error:#}");
+                }
+                if updated.is_err() && crate::warship::has_pending_update() {
+                    crate::warship::rollback(&cancel)?;
+                }
+                let mut config =
+                    WebuiLaunchConfig::from_deploy_config(get_deploy_config().as_ref());
+                config.port = controller.port;
+                let (backend, recovered) = crate::warship::launch(&config, &cancel)?;
+                *controller.backend.lock().unwrap() = Some((task, backend));
+                controller.change(|m| {
+                    m.view.backend_running = true;
+                    m.touch();
+                });
+                controller.start_session(task);
+                if recovered {
+                    controller.change(|m| {
+                        m.view.message = Some("新版本无法启动，已恢复原版本".into());
+                        m.touch();
+                    });
+                }
+                if let Err(error) = updated {
+                    controller.change(|m| {
+                        m.view.message = Some(format!("更新失败，已恢复原版本：{error:#}"));
+                        m.touch();
+                    });
+                }
+                Ok(())
+            })();
+            controller.finish(task, result);
+            controller.open_webui();
+        });
+        Ok(())
+    }
+
     fn start(self: &Arc<Self>) -> Result<()> {
         let deployment_required =
             crate::components::deployment_required(&setup::azurpilot_repo_dir());
@@ -549,7 +640,7 @@ impl Launcher {
                     task,
                     SplashUpdate::loading(t!("splash.starting"), t!("splash.starting_backend"), 97),
                 );
-                let backend = ManagedBackend::new_cancellable(&config, &cancel)?;
+                let (backend, _) = crate::warship::launch(&config, &cancel)?;
                 // Prevent cancellation racing with adoption of a newly spawned backend.
                 {
                     let mut model = controller.model.lock().unwrap();
@@ -617,6 +708,7 @@ impl Launcher {
         let handler = Arc::new(NativeChannelHandler {
             app: self.app.clone(),
             on_click,
+            pending_update: Mutex::new(None),
         });
         let (channel, worker) = start_launcher_channel(
             self.port,
@@ -902,10 +994,12 @@ pub(crate) fn authorize(window: &WebviewWindow, home_only: bool) -> Result<(), S
     // tray_menu 弹窗只做只读调用（读语言、设置）。
     let label = window.label();
     if label != "launcher"
-        && (home_only
-            || (label != "main" && label != crate::tray_menu::TRAY_MENU_LABEL))
+        && (home_only || (label != "main" && label != crate::tray_menu::TRAY_MENU_LABEL))
     {
-        warn!("Rejected IPC from window '{}': home_only={}", label, home_only);
+        warn!(
+            "Rejected IPC from window '{}': home_only={}",
+            label, home_only
+        );
         return Err(t!("launcher.forbidden").to_string());
     }
     Ok(())

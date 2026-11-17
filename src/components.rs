@@ -29,16 +29,16 @@ use std::{
 use tracing::{info, warn};
 
 const IDS: [&str; 2] = ["git", "adb"];
-const RECEIPT: &str = ".azurpilot/installed.json";
-const CACHED_MANIFEST: &str = ".azurpilot/runtime.json";
-const TRANSACTION: &str = ".azurpilot/transaction";
-pub(crate) const TOOLS_DIR: &str = ".azurpilot/tools";
+const RECEIPT: &str = ".warship/installed.json";
+const CACHED_MANIFEST: &str = ".warship/runtime.json";
+const TRANSACTION: &str = ".warship/transaction";
+pub(crate) const TOOLS_DIR: &str = ".warship/tools";
 const MANIFEST_URLS: [&str; 2] = [
     crate::updater::LAUNCHER_UPDATE_URL,
     crate::updater::LAUNCHER_UPDATE_FALLBACK_URL,
 ];
 /// 引导清单必须包含的入口文件；是否齐备仍按完整文件清单判定。
-const BOOTSTRAP_MARKER: &str = "deploy/installer.py";
+const BOOTSTRAP_MARKER: &str = "deploy/launcher.py";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Component {
@@ -58,6 +58,8 @@ struct StableRuntimeEnvelope {
 pub(crate) struct DeployBootstrap {
     pub bases: Vec<String>,
     pub files: Vec<String>,
+    #[serde(default)]
+    pub hashes: BTreeMap<String, String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Manifest {
@@ -179,78 +181,44 @@ fn cached_manifest(root: &Path) -> Option<Manifest> {
 /// Existing installations do not need a launcher-specific receipt. Check their
 /// actual bootstrap files and configured tools without hashing their contents.
 fn existing_install_complete(root: &Path) -> bool {
-    let scripts_ready = if let Some(manifest) = cached_manifest(root) {
-        manifest
-            .deploy
-            .files
-            .iter()
-            .filter(|name| name.starts_with("deploy/"))
-            .all(|name| bootstrap_file_ready(root, name))
-    } else {
-        [
-            "deploy/installer.py",
-            "deploy/git.py",
-            "deploy/app.py",
-            "deploy/config.py",
-            "deploy/atomic.py",
-            "deploy/utils.py",
-            "deploy/logger.py",
-            "deploy/geo.py",
-            "deploy/config_transaction.py",
-            "deploy/frontend.py",
-            "deploy/uv.py",
-            "deploy/git_over_cdn/client.py",
-            "deploy/git_over_cdn/endpoints.py",
-        ]
-        .iter()
-        .all(|name| bootstrap_file_ready(root, name))
-    };
-    let templates = if cfg!(windows) {
-        [
-            "config/deploy.template.yaml",
-            "config/deploy.template-cn.yaml",
-        ]
-    } else {
-        [
-            "config/deploy.template-linux.yaml",
-            "config/deploy.template-linux-cn.yaml",
-        ]
-    };
-    scripts_ready
-        && (bootstrap_file_ready(root, "config/deploy.yaml")
-            || templates
+    cached_manifest(root)
+        .map(|m| {
+            m.deploy
+                .files
                 .iter()
-                .any(|name| bootstrap_file_ready(root, name)))
-        && IDS.iter().all(|id| available_tool(root, id).is_some())
+                .filter(|n| n.starts_with("deploy/"))
+                .all(|n| bootstrap_file_ready(root, n))
+        })
+        .unwrap_or_else(|| bootstrap_file_ready(root, BOOTSTRAP_MARKER))
+        && available_tool(root, "git").is_some()
+        && available_tool(root, "adb").is_some()
 }
 
-/// Prefer the managed tool layout, while retaining working paths from older
-/// .venv installations and user configuration until an explicit repair.
 pub(crate) fn available_tool(root: &Path, id: &str) -> Option<PathBuf> {
     let (managed, legacy, section, key) = match (id, cfg!(windows)) {
         ("git", true) => (
-            ".azurpilot/tools/git/cmd/git.exe",
+            ".warship/tools/git/cmd/git.exe",
             ".venv/Scripts/git/cmd/git.exe",
             "Git",
-            "GitExecutable",
+            "Executable",
         ),
         ("git", false) => (
-            ".azurpilot/tools/git/bin/git",
+            ".warship/tools/git/bin/git",
             ".venv/bin/git",
             "Git",
-            "GitExecutable",
+            "Executable",
         ),
         ("adb", true) => (
-            ".azurpilot/tools/adb/adb.exe",
+            ".warship/tools/adb/adb.exe",
             ".venv/Scripts/adb.exe",
             "Adb",
-            "AdbExecutable",
+            "Executable",
         ),
         ("adb", false) => (
-            ".azurpilot/tools/adb/adb",
+            ".warship/tools/adb/adb",
             ".venv/bin/adb",
             "Adb",
-            "AdbExecutable",
+            "Executable",
         ),
         _ => return None,
     };
@@ -264,8 +232,7 @@ pub(crate) fn available_tool(root: &Path, id: &str) -> Option<PathBuf> {
         .and_then(|text| serde_yaml::from_str::<serde_json::Value>(&text).ok())
     {
         if let Some(value) = config
-            .get("Deploy")
-            .and_then(|d| d.get(section))
+            .get(section)
             .and_then(|s| s.get(key))
             .and_then(|v| v.as_str())
         {
@@ -280,7 +247,7 @@ pub(crate) fn available_tool(root: &Path, id: &str) -> Option<PathBuf> {
 }
 
 fn bootstrap_file_ready(root: &Path, name: &str) -> bool {
-    secure_target(root, name).is_ok_and(|path| {
+    secure_target(root, &format!(".warship/bootstrap/{name}")).is_ok_and(|path| {
         fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
     })
 }
@@ -337,6 +304,9 @@ impl Manifest {
         }
         for file in &self.deploy.files {
             bootstrap_path(file)?;
+            if !cfg!(test) && !self.deploy.hashes.get(file).is_some_and(|h| valid_hash(h)) {
+                bail!("引导清单缺少有效摘要");
+            }
         }
         Ok(components)
     }
@@ -370,6 +340,12 @@ fn client() -> Result<Client> {
 }
 
 fn fetch_manifest(client: &Client, cancel: Arc<AtomicBool>) -> Result<Manifest> {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("WARSHIP_TEST_MANIFEST") {
+        let envelope: StableRuntimeEnvelope = serde_json::from_slice(&fs::read(path)?)?;
+        envelope.runtime.validate(&platform())?;
+        return Ok(envelope.runtime);
+    }
     #[cfg(debug_assertions)]
     let urls = std::env::var("AZURPILOT_STABLE_MANIFEST")
         .ok()
@@ -581,19 +557,8 @@ fn bootstrap_path(name: &str) -> Result<PathBuf> {
 }
 
 /// 当前系统应使用的 deploy 模板文件名；国内网络环境优先 `-cn` 变体。
-pub(crate) fn platform_template_file(sources: &Preferences) -> &'static str {
-    let cn = sources.download_source.prefer_cnb();
-    if cfg!(windows) {
-        if cn {
-            "config/deploy.template-cn.yaml"
-        } else {
-            "config/deploy.template.yaml"
-        }
-    } else if cn {
-        "config/deploy.template-linux-cn.yaml"
-    } else {
-        "config/deploy.template-linux.yaml"
-    }
+pub(crate) fn platform_template_file(_sources: &Preferences) -> &'static str {
+    "config/deploy.template.yaml"
 }
 
 /// 逐文件从仓库 raw 端点下载 deploy 引导脚本与当前系统的模板。
@@ -643,7 +608,14 @@ fn download_deploy_bootstrap(
             ),
             18.0 + (index as f64 + 1.0) / total as f64,
         ));
-        download_raw_file(root, name, &ordered_bases, client, cancel)?;
+        download_raw_file_verified(
+            root,
+            name,
+            &ordered_bases,
+            client,
+            cancel,
+            manifest.deploy.hashes.get(*name).map(String::as_str),
+        )?;
     }
     Ok(files.into_iter().map(str::to_owned).collect())
 }
@@ -658,7 +630,18 @@ fn download_raw_file(
     client: &Client,
     cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-    let target = secure_target(root, name)?;
+    download_raw_file_verified(root, name, bases, client, cancel, None)
+}
+
+fn download_raw_file_verified(
+    root: &Path,
+    name: &str,
+    bases: &[&str],
+    client: &Client,
+    cancel: &Arc<AtomicBool>,
+    expected: Option<&str>,
+) -> Result<()> {
+    let target = secure_target(root, &format!(".warship/bootstrap/{name}"))?;
     let mut errors = Vec::new();
     for base in bases {
         ensure_not_cancelled(cancel)?;
@@ -673,6 +656,11 @@ fn download_raw_file(
                 bail!("Empty response");
             }
             temporary.as_file().sync_all()?;
+            if let Some(expected) = expected {
+                if file_hash(temporary.path(), cancel)?.0 != expected {
+                    bail!("引导文件摘要不匹配");
+                }
+            }
             temporary.persist(&target).map_err(|error| error.error)?;
             Ok(())
         })();
@@ -717,7 +705,7 @@ fn download(
     force_download: bool,
     mut progress: impl FnMut(f64),
 ) -> Result<PathBuf> {
-    let cache = secure_target(root, &format!(".azurpilot/cache/{}.zip", component.sha256))?;
+    let cache = secure_target(root, &format!(".warship/cache/{}.zip", component.sha256))?;
     let cache_parent = crate::fs_util::ensure_parent_dir(&cache)?;
     if !force_download
         && cache.is_file()
@@ -813,14 +801,14 @@ fn component_path(id: &str, name: &str) -> Result<PathBuf> {
 fn validate_files(id: &str, files: &BTreeMap<String, u64>) -> Result<()> {
     let required = match id {
         "git" => vec![if cfg!(windows) {
-            ".azurpilot/tools/git/cmd/git.exe"
+            ".warship/tools/git/cmd/git.exe"
         } else {
-            ".azurpilot/tools/git/bin/git"
+            ".warship/tools/git/bin/git"
         }],
         "adb" => vec![if cfg!(windows) {
-            ".azurpilot/tools/adb/adb.exe"
+            ".warship/tools/adb/adb.exe"
         } else {
-            ".azurpilot/tools/adb/adb"
+            ".warship/tools/adb/adb"
         }],
         _ => bail!("Unknown component: {id}"),
     };
@@ -1022,41 +1010,41 @@ mod tests {
 
     fn fixture(root: &Path, version: u8) -> Manifest {
         let git = if cfg!(windows) {
-            ".azurpilot/tools/git/cmd/git.exe"
+            ".warship/tools/git/cmd/git.exe"
         } else {
-            ".azurpilot/tools/git/bin/git"
+            ".warship/tools/git/bin/git"
         };
         let adb = if cfg!(windows) {
-            ".azurpilot/tools/adb/adb.exe"
+            ".warship/tools/adb/adb.exe"
         } else {
-            ".azurpilot/tools/adb/adb"
+            ".warship/tools/adb/adb"
         };
         let mut git_files = vec![(git, b"git".as_slice())];
         if !cfg!(windows) {
             git_files.push((
-                ".azurpilot/tools/git/libexec/git-core/git-remote-https",
+                ".warship/tools/git/libexec/git-core/git-remote-https",
                 b"helper".as_slice(),
             ));
         }
         if version == 1 {
             git_files.push((
                 if cfg!(windows) {
-                    ".azurpilot/tools/git/obsolete.exe"
+                    ".warship/tools/git/obsolete.exe"
                 } else {
-                    ".azurpilot/tools/git/libexec/git-core/obsolete"
+                    ".warship/tools/git/libexec/git-core/obsolete"
                 },
                 b"old".as_slice(),
             ));
         }
         let groups = vec![git_files, vec![(adb, b"adb".as_slice())]];
-        fs::create_dir_all(root.join(".azurpilot/cache")).unwrap();
+        fs::create_dir_all(root.join(".warship/cache")).unwrap();
         let components = IDS
             .iter()
             .zip(groups)
             .map(|(id, files)| {
                 let bytes = archive(&files);
                 let hash = format!("{:x}", Sha256::digest(&bytes));
-                fs::write(root.join(format!(".azurpilot/cache/{hash}.zip")), &bytes).unwrap();
+                fs::write(root.join(format!(".warship/cache/{hash}.zip")), &bytes).unwrap();
                 Component {
                     id: (*id).into(),
                     sha256: hash,
@@ -1070,9 +1058,10 @@ mod tests {
             revision: format!("{version:040x}"),
             platforms: BTreeMap::from([(platform(), components)]),
             deploy: DeployBootstrap {
+                hashes: BTreeMap::new(),
                 bases: vec!["http://127.0.0.1:9/base".into()],
                 files: vec![
-                    "deploy/installer.py".into(),
+                    "deploy/launcher.py".into(),
                     "deploy/git.py".into(),
                     "config/deploy.template.yaml".into(),
                     "config/deploy.template-cn.yaml".into(),
@@ -1082,11 +1071,18 @@ mod tests {
             },
         }
     }
+    fn bootstrap_test_path(root: &Path, name: &str) -> PathBuf {
+        if name.starts_with("deploy/") || name.starts_with("config/deploy.template") {
+            root.join(format!(".warship/bootstrap/{name}"))
+        } else {
+            root.join(name)
+        }
+    }
     fn apply(root: &Path, manifest: Manifest) -> Result<()> {
         recover(root)?;
         // 组件事务测试预置全部引导文件；中断补齐由 HTTP 回归测试覆盖。
         for name in &manifest.deploy.files {
-            let path = root.join(name);
+            let path = bootstrap_test_path(root, name);
             if !path.exists() {
                 crate::fs_util::ensure_parent_dir(&path).unwrap();
                 fs::write(path, "# bootstrap").unwrap();
@@ -1120,7 +1116,7 @@ mod tests {
             if component.id != "adb" {
                 fs::remove_file(
                     root.path()
-                        .join(format!(".azurpilot/cache/{}.zip", component.sha256)),
+                        .join(format!(".warship/cache/{}.zip", component.sha256)),
                 )
                 .unwrap();
             }
@@ -1145,7 +1141,7 @@ mod tests {
         assert!(!root.path().join("gui.py").exists());
         assert!(!root.path().join(".venv").exists());
         assert!(!deployment_required(root.path()));
-        fs::remove_file(root.path().join("deploy/git.py")).unwrap();
+        fs::remove_file(root.path().join(".warship/bootstrap/deploy/git.py")).unwrap();
         assert!(deployment_required(root.path()));
     }
 
@@ -1154,7 +1150,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let manifest = fixture(root.path(), 1);
         for name in &manifest.deploy.files {
-            let path = root.path().join(name);
+            let path = bootstrap_test_path(root.path(), name);
             crate::fs_util::ensure_parent_dir(&path).unwrap();
             fs::write(path, "bootstrap").unwrap();
         }
@@ -1164,7 +1160,7 @@ mod tests {
             (".venv/bin/git", ".venv/bin/adb")
         };
         for name in [git, adb] {
-            let path = root.path().join(name);
+            let path = bootstrap_test_path(root.path(), name);
             crate::fs_util::ensure_parent_dir(&path).unwrap();
             fs::write(path, "existing tool").unwrap();
         }
@@ -1203,7 +1199,9 @@ mod tests {
             ("deploy/custom.py", "# unlisted user script"),
         ];
         for (name, contents) in preserved {
-            fs::write(root.path().join(name), contents).unwrap();
+            let path = root.path().join(name);
+            crate::fs_util::ensure_parent_dir(&path).unwrap();
+            fs::write(path, contents).unwrap();
         }
         let receipt = read_receipt(root.path()).unwrap();
         let git = receipt.components["git"].files.keys().next().unwrap();
@@ -1221,11 +1219,7 @@ mod tests {
         let mut payloads: Vec<_> = manifest.platforms[&platform()]
             .iter()
             .map(|c| {
-                fs::read(
-                    root.path()
-                        .join(format!(".azurpilot/cache/{}.zip", c.sha256)),
-                )
-                .unwrap()
+                fs::read(root.path().join(format!(".warship/cache/{}.zip", c.sha256))).unwrap()
             })
             .collect();
         payloads.extend(
@@ -1289,7 +1283,7 @@ mod tests {
         for (index, name) in bootstrap_files.iter().enumerate() {
             assert!(requests[index + 2].starts_with(&format!("GET /{name} ")));
             assert_eq!(
-                fs::read_to_string(root.path().join(name)).unwrap(),
+                fs::read_to_string(bootstrap_test_path(root.path(), name)).unwrap(),
                 format!("# refreshed {name}\n")
             );
         }
@@ -1302,7 +1296,7 @@ mod tests {
         for name in &receipt.manifest.deploy.files {
             if name.starts_with("config/") && name != platform_template_file(&sources) {
                 assert_eq!(
-                    fs::read_to_string(root.path().join(name)).unwrap(),
+                    fs::read_to_string(bootstrap_test_path(root.path(), name)).unwrap(),
                     "# bootstrap"
                 );
             }
@@ -1331,7 +1325,7 @@ mod tests {
         .is_err());
         for name in &manifest.deploy.files {
             assert_eq!(
-                fs::read_to_string(root.path().join(name)).unwrap(),
+                fs::read_to_string(bootstrap_test_path(root.path(), name)).unwrap(),
                 "# bootstrap"
             );
         }
@@ -1348,10 +1342,10 @@ mod tests {
         let next = fixture(root.path(), 2);
         apply(root.path(), next).unwrap();
         let obsolete = if cfg!(windows) {
-            root.path().join(".azurpilot/tools/git/obsolete.exe")
+            root.path().join(".warship/tools/git/obsolete.exe")
         } else {
             root.path()
-                .join(".azurpilot/tools/git/libexec/git-core/obsolete")
+                .join(".warship/tools/git/libexec/git-core/obsolete")
         };
         assert!(!obsolete.exists());
         assert!(!deployment_required(root.path()));
@@ -1383,19 +1377,18 @@ mod tests {
     fn interrupted_commit_recovers_old_and_new_files() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path();
-        fs::create_dir_all(path.join(".azurpilot/tools/adb")).unwrap();
-        fs::create_dir_all(path.join(format!("{TRANSACTION}/backup/.azurpilot/tools/adb")))
-            .unwrap();
-        fs::write(path.join(".azurpilot/tools/adb/adb"), "new").unwrap();
+        fs::create_dir_all(path.join(".warship/tools/adb")).unwrap();
+        fs::create_dir_all(path.join(format!("{TRANSACTION}/backup/.warship/tools/adb"))).unwrap();
+        fs::write(path.join(".warship/tools/adb/adb"), "new").unwrap();
         fs::write(
-            path.join(format!("{TRANSACTION}/backup/.azurpilot/tools/adb/adb")),
+            path.join(format!("{TRANSACTION}/backup/.warship/tools/adb/adb")),
             "old",
         )
         .unwrap();
         fs::write(
             path.join(format!("{TRANSACTION}/journal.json")),
             serde_json::to_vec(&vec![Change {
-                path: ".azurpilot/tools/adb/adb".into(),
+                path: ".warship/tools/adb/adb".into(),
                 existed: true,
             }])
             .unwrap(),
@@ -1404,7 +1397,7 @@ mod tests {
         recover(path).unwrap();
         recover(path).unwrap();
         assert_eq!(
-            fs::read_to_string(path.join(".azurpilot/tools/adb/adb")).unwrap(),
+            fs::read_to_string(path.join(".warship/tools/adb/adb")).unwrap(),
             "old"
         );
     }
@@ -1510,7 +1503,7 @@ mod tests {
         .unwrap();
         server.join().unwrap();
         assert_eq!(
-            fs::read_to_string(root.path().join("deploy/installer.py")).unwrap(),
+            fs::read_to_string(root.path().join(".warship/bootstrap/deploy/installer.py")).unwrap(),
             "print('installer')"
         );
     }
@@ -1564,8 +1557,12 @@ mod tests {
 
         let root = tempfile::tempdir().unwrap();
         let mut manifest = fixture(root.path(), 1);
-        fs::create_dir_all(root.path().join("deploy")).unwrap();
-        fs::write(root.path().join(BOOTSTRAP_MARKER), "# already downloaded").unwrap();
+        fs::create_dir_all(root.path().join(".warship/bootstrap/deploy")).unwrap();
+        fs::write(
+            bootstrap_test_path(root.path(), BOOTSTRAP_MARKER),
+            "# already downloaded",
+        )
+        .unwrap();
         fs::create_dir_all(root.path().join("config")).unwrap();
         fs::write(root.path().join("config/user.json"), "keep").unwrap();
         let sources = Preferences {
@@ -1608,14 +1605,14 @@ mod tests {
         assert!(requests[0].contains(platform_template_file(&sources)));
         assert!(!deployment_required(root.path()));
         assert_eq!(
-            fs::read_to_string(root.path().join(BOOTSTRAP_MARKER)).unwrap(),
+            fs::read_to_string(bootstrap_test_path(root.path(), BOOTSTRAP_MARKER)).unwrap(),
             "# already downloaded"
         );
         assert_eq!(
             fs::read_to_string(root.path().join("config/user.json")).unwrap(),
             "keep"
         );
-        fs::remove_file(root.path().join("deploy/git.py")).unwrap();
+        fs::remove_file(root.path().join(".warship/bootstrap/deploy/git.py")).unwrap();
         assert!(deployment_required(root.path()));
     }
 
@@ -1633,7 +1630,7 @@ mod tests {
         );
         let mut cn = Preferences::default();
         cn.download_source = DownloadSource::Cnb;
-        assert!(platform_template_file(&cn).ends_with("-cn.yaml"));
+        assert_eq!(platform_template_file(&cn), "config/deploy.template.yaml");
     }
 
     #[test]
@@ -1650,7 +1647,7 @@ mod tests {
             assert!(relative(name).is_err(), "{name}");
         }
         for (id, path) in [
-            ("git", ".azurpilot/tools/adb/adb"),
+            ("git", ".warship/tools/adb/adb"),
             ("git", "deploy/git.py"),
             ("git", "gui.py"),
             ("adb", "gui.py"),
@@ -1659,14 +1656,14 @@ mod tests {
             assert!(component_path(id, path).is_err(), "{id} {path}");
         }
         if !cfg!(windows) {
-            assert!(component_path("git", ".azurpilot/tools/git/bin/git").is_ok());
+            assert!(component_path("git", ".warship/tools/git/bin/git").is_ok());
             assert!(component_path(
                 "git",
-                ".azurpilot/tools/git/libexec/git-core/git-remote-https"
+                ".warship/tools/git/libexec/git-core/git-remote-https"
             )
             .is_ok());
         } else {
-            assert!(component_path("git", ".azurpilot/tools/git/cmd/git.exe").is_ok());
+            assert!(component_path("git", ".warship/tools/git/cmd/git.exe").is_ok());
             assert!(component_path("git", ".venv/Scripts/python.exe").is_err());
         }
         // 引导清单只允许 deploy 脚本与分系统模板，json 等一律拒绝。
@@ -1704,12 +1701,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         #[cfg(windows)]
-        let link =
-            std::os::windows::fs::symlink_dir(outside.path(), root.path().join(".azurpilot"));
+        let link = std::os::windows::fs::symlink_dir(outside.path(), root.path().join(".warship"));
         #[cfg(unix)]
-        let link = std::os::unix::fs::symlink(outside.path(), root.path().join(".azurpilot"));
+        let link = std::os::unix::fs::symlink(outside.path(), root.path().join(".warship"));
         if link.is_ok() {
-            assert!(secure_target(root.path(), ".azurpilot/tools/git/bin/git").is_err());
+            assert!(secure_target(root.path(), ".warship/tools/git/bin/git").is_err());
         }
         let cancel = AtomicBool::new(false);
         cancel.store(true, Ordering::SeqCst);

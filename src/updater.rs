@@ -33,7 +33,7 @@ use tempfile::Builder as TempDirBuilder;
 pub(crate) const LAUNCHER_UPDATE_URL: &str = env!("LAUNCHER_UPDATE_URL");
 /// 主 URL 不可用时的更新清单回退 URL。
 pub(crate) const LAUNCHER_UPDATE_FALLBACK_URL: &str =
-    "https://ap.launcher-update.nanoda.work/updata/stable.json";
+    "https://ghfast.top/https://github.com/a2893005741/alas-launcher/releases/download/manifest/stable.json";
 /// 存在该环境变量时跳过启动器更新检查（自更新重启后的新一轮启动会带上）。
 const LAUNCHER_UPDATE_SKIP_ENV: &str = "AZURPILOT_SKIP_LAUNCHER_UPDATE";
 /// 迷你版启动器的版本号：迷你版即使已是"最新"也必须升级到正式版。

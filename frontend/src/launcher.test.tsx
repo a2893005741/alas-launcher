@@ -117,127 +117,16 @@ describe("launcher actions", () => {
     fireEvent.click(screen.getByRole("option", { name: "Taobao mirror" }));
     await waitFor(() => expect(bridge.command).toHaveBeenCalledWith("settings_set", { settings: { ...settings, pythonSource: "npmmirror" } }));
   });
-  it("saves the Node.js mirror independently and restores it after restarting the launcher", async () => {
-    let settings = { launchOnStartup: false, autoStartService: false, keepWebviewOnTray: false, reducedMotion: false, preventSleep: false, audioEnabled: false, updateChannel: "stable", updateSource: "auto", language: null, downloadSource: "auto", pythonSource: "npmmirror", nodejsSource: "auto", pypiSource: "auto" };
-    bridge.command.mockImplementation(async (name: string, args?: { settings: typeof settings }) => {
-      if (name === "settings_set" && args) settings = args.settings;
-      return name === "settings_get" || name === "settings_set" ? settings : undefined;
-    });
-    await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("combobox", { name: "Node.js source" }));
-    const options = await screen.findAllByRole("option");
-    expect(options.map(option => option.textContent)).toEqual(["Auto", "Taobao mirror", "Nanjing University", "Official source"]);
-    fireEvent.click(screen.getByRole("option", { name: "Nanjing University" }));
-    await waitFor(() => expect(bridge.command).toHaveBeenCalledWith("settings_set", { settings: { ...settings, nodejsSource: "nju", pythonSource: "npmmirror" } }));
-    // 重挂载验证保存值，避免依赖 Fluent UI 关闭弹窗时在 jsdom 中异步恢复焦点。
-    cleanup();
-    await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const restored = await screen.findByRole("combobox", { name: "Node.js source" });
-    expect(restored.textContent).toContain("Nanjing University");
+  it("hides the unused Node.js source for WarshipPilot", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(screen.queryByRole("combobox", { name: "Node.js source" })).toBeNull();
   });
-  it("pauses the background video when reduced motion is enabled", async () => {
-    const settings = { launchOnStartup: false, autoStartService: false, keepWebviewOnTray: false, reducedMotion: false, preventSleep: false, audioEnabled: false, updateChannel: "stable", updateSource: "auto", language: null, downloadSource: "auto", pythonSource: "auto", pypiSource: "auto" };
-    bridge.command.mockImplementation(async (name: string, args?: { settings: unknown }) => name === "settings_set" ? args?.settings : name === "settings_get" ? settings : undefined);
-    // 覆写系统偏好为“未减弱动态”，验证视频暂停完全由启动器设置驱动。
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      addEventListener() {},
-      removeEventListener() {},
-    });
-    const pause = vi.fn();
-    HTMLMediaElement.prototype.pause = pause;
-    await mount();
-    expect(pause).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const toggle = await screen.findByRole("switch", { name: "Reduce motion" });
-    fireEvent.click(toggle);
-    await waitFor(() => expect(bridge.command).toHaveBeenCalledWith("settings_set", { settings: { ...settings, reducedMotion: true } }));
-    await waitFor(() => expect(pause).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("switch", { name: "Prevent automatic sleep" }));
-    await waitFor(() => expect(bridge.command).toHaveBeenCalledWith("settings_set", { settings: { ...settings, reducedMotion: true, preventSleep: true } }));
-  });
-  it("pauses hidden-window video and resumes it on restore", async () => {
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      addEventListener() {},
-      removeEventListener() {},
-    });
-    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
-    await mount();
-    const video = document.querySelector("video")!;
-    // 播放完全由可见性及偏好控制，避免隐藏启动时 autoplay 抢先播放。
-    expect(video.autoplay).toBe(false);
-    expect(video.play).toHaveBeenCalled();
-    expect(video.pause).not.toHaveBeenCalled();
 
-    hidden.mockReturnValue(true);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(video.pause).toHaveBeenCalledTimes(1);
-    vi.mocked(video.play).mockClear();
 
-    hidden.mockReturnValue(false);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(video.play).toHaveBeenCalledTimes(1);
-    expect(video.muted).toBe(true);
-  });
-  it("keeps initially hidden video paused and honors motion preferences on restore", async () => {
-    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
-    let onMotionChange = () => {};
-    const motion = {
-      matches: false,
-      addEventListener: (_name: string, listener: () => void) => { onMotionChange = listener; },
-      removeEventListener() {},
-    };
-    window.matchMedia = vi.fn().mockReturnValue(motion);
-    await mount();
-    const video = document.querySelector("video")!;
-    expect(video.play).not.toHaveBeenCalled();
-    expect(video.pause).toHaveBeenCalled();
 
-    motion.matches = true;
-    hidden.mockReturnValue(false);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(video.play).not.toHaveBeenCalled();
 
-    motion.matches = false;
-    act(() => onMotionChange());
-    expect(video.play).toHaveBeenCalledTimes(1);
-  });
-  it("does not resume hidden video after changing audio or reduced motion settings", async () => {
-    const settings = { launchOnStartup: false, autoStartService: false, keepWebviewOnTray: true, reducedMotion: true, preventSleep: false, audioEnabled: false, updateChannel: "stable", updateSource: "auto", language: null, downloadSource: "auto", pythonSource: "auto", pypiSource: "auto" };
-    bridge.command.mockImplementation(async (name: string, args?: { settings: unknown }) => name === "settings_set" ? args?.settings : name === "settings_get" ? settings : undefined);
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      addEventListener() {},
-      removeEventListener() {},
-    });
-    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
-    await mount();
-    const video = document.querySelector("video")!;
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const toggle = await screen.findByRole("switch", { name: "Reduce motion" });
-    fireEvent.click(toggle);
-    await waitFor(() => expect(bridge.command).toHaveBeenCalledWith("settings_set", { settings: { ...settings, reducedMotion: false } }));
-    await waitFor(() => expect(document.documentElement.classList.contains("reduced-motion")).toBe(false));
-    fireEvent.click(screen.getByRole("switch", { name: "Play background music" }));
-    await waitFor(() => expect(video.muted).toBe(false));
-    expect(video.play).not.toHaveBeenCalled();
 
-    hidden.mockReturnValue(false);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(video.play).toHaveBeenCalledTimes(1);
-    expect(video.muted).toBe(false);
-    fireEvent.click(toggle);
-    await waitFor(() => expect(document.documentElement.classList.contains("reduced-motion")).toBe(true));
-    vi.mocked(video.play).mockClear();
-    hidden.mockReturnValue(true);
-    fireEvent(document, new Event("visibilitychange"));
-    hidden.mockReturnValue(false);
-    fireEvent(document, new Event("visibilitychange"));
-    expect(video.play).not.toHaveBeenCalled();
-  });
   it("shows Deploy for missing components and Run after deployment", async () => {
     await mount();
     await send({ deployment_required: true, can_start: false, can_deploy: true });

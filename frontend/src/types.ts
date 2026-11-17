@@ -10,7 +10,7 @@ export type Phase =
   | "repairing"
   | "cancelling"
   | "error";
-export type Operation = "check" | "update" | "deploy" | "start" | "stop" | "repair";
+export type Operation = "check" | "update" | "deploy" | "start" | "stop" | "repair" | "backend_update";
 export interface Progress {
   title: string;
   detail: string;

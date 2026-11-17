@@ -25,6 +25,8 @@ use tungstenite::{
 struct Handler {
     writes: AtomicUsize,
     notices: AtomicUsize,
+    updates: AtomicUsize,
+    update_acks: AtomicUsize,
 }
 
 impl ChannelHandler for Handler {
@@ -35,6 +37,13 @@ impl ChannelHandler for Handler {
         Ok(json!({"supported":true,"enabled":enabled.unwrap_or(false)}))
     }
 
+    fn backend_update(&self, _target: String) -> Result<Value> {
+        self.updates.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({"accepted":true}))
+    }
+    fn update_response_sent(&self) {
+        self.update_acks.fetch_add(1, Ordering::SeqCst);
+    }
     fn notification(&self, _data: Value) -> Result<()> {
         self.notices.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -267,6 +276,48 @@ fn python_backend_interop() {
     assert!(launcher_protocol::valid_ticket(
         &channel.login_ticket().unwrap()
     ));
+    channel.close();
+    worker.join().unwrap();
+}
+
+#[test]
+fn backend_update_validates_commit_and_executes_after_ack_only_once() {
+    let listener = listener();
+    let port = listener.local_addr().unwrap().port();
+    let handler = Arc::new(Handler::default());
+    let checked = handler.clone();
+    let server = thread::spawn(move || {
+        let mut socket = accept(&listener);
+        let mut login = false;
+        write(
+            &mut socket,
+            json!({"type":"request","id":"invalid-target","method":"backend.update","params":{"target":"main"}}),
+        );
+        assert_eq!(
+            response(&mut socket, "invalid-target", &mut login)["error"]["code"],
+            "INVALID_PARAMS"
+        );
+        let request = json!({"type":"request","id":"update","method":"backend.update","params":{"target":"a".repeat(40)}});
+        write(&mut socket, request.clone());
+        assert_eq!(
+            response(&mut socket, "update", &mut login)["result"]["accepted"],
+            true
+        );
+        write(&mut socket, request);
+        assert_eq!(
+            response(&mut socket, "update", &mut login)["result"]["accepted"],
+            true
+        );
+        assert_eq!(checked.updates.load(Ordering::SeqCst), 1);
+        assert_eq!(checked.update_acks.load(Ordering::SeqCst), 1);
+    });
+    let (channel, worker) = start_launcher_channel(
+        port,
+        "fixture-secret".into(),
+        Arc::new(AtomicBool::new(false)),
+        handler,
+    );
+    server.join().unwrap();
     channel.close();
     worker.join().unwrap();
 }

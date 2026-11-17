@@ -83,7 +83,7 @@ impl Distribution {
     fn target(&self, root: &Path) -> Result<PathBuf> {
         crate::components::secure_target(
             root,
-            &format!(".azurpilot/tools/nodejs/{}", self.directory()),
+            &format!(".warship/tools/nodejs/{}", self.directory()),
         )
     }
 }
@@ -550,7 +550,7 @@ mod tests {
             vec![]
         )
         .is_err());
-        assert!(!root.path().join(".azurpilot").exists());
+        assert!(!root.path().join(".warship").exists());
         assert_eq!(
             fs::read_to_string(root.path().join("keep")).unwrap(),
             "environment"

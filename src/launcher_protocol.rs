@@ -48,3 +48,12 @@ pub fn valid_ticket(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendUpdateParams {
+    pub target: String,
+}
+pub fn valid_commit(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}

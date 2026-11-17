@@ -168,18 +168,18 @@ fn platform_python_config_path() -> &'static str {
 /// 返回 deploy.yaml 中 adb 可执行文件的平台约定路径。
 fn platform_adb_config_path() -> &'static str {
     if cfg!(windows) {
-        "./.azurpilot/tools/adb/adb.exe"
+        "./.warship/tools/adb/adb.exe"
     } else {
-        "./.azurpilot/tools/adb/adb"
+        "./.warship/tools/adb/adb"
     }
 }
 
 /// 返回 deploy.yaml 中 git 可执行文件的平台约定路径。
 fn platform_git_config_path() -> &'static str {
     if cfg!(windows) {
-        "./.azurpilot/tools/git/cmd/git.exe"
+        "./.warship/tools/git/cmd/git.exe"
     } else {
-        "./.azurpilot/tools/git/bin/git"
+        "./.warship/tools/git/bin/git"
     }
 }
 
@@ -191,7 +191,6 @@ fn platform_git_config_path() -> &'static str {
 /// `AzurPilot.app/Contents/AzurPilot`（取代旧版历史目录，旧目录由
 /// [`migrate_legacy_macos_repo_layout`] 在启动时自动迁移）。
 pub fn azurpilot_repo_dir() -> PathBuf {
-    #[cfg(debug_assertions)]
     if let Some(root) = std::env::var_os("AZURPILOT_REPO_DIR") {
         return PathBuf::from(root);
     }
@@ -305,7 +304,7 @@ fn venv_python_install_dir() -> PathBuf {
 }
 
 /// `.venv` 内 uv 的完整路径。
-fn venv_uv() -> PathBuf {
+pub(crate) fn venv_uv() -> PathBuf {
     venv_bin_dir().join(if cfg!(windows) { "uv.exe" } else { "uv" })
 }
 
@@ -352,7 +351,7 @@ fn clean_orphan_bootstrap_dirs() {
 ///
 /// # Errors
 /// 未内嵌且系统上找不到 uv 时返回 Err（提示用户 uv 未找到）。
-fn bootstrap_uv_path() -> Result<PathBuf> {
+pub(crate) fn bootstrap_uv_path() -> Result<PathBuf> {
     clean_orphan_bootstrap_dirs();
     // 临时目录带进程 ID：防止同一台机器并行运行多个启动器实例时互相覆盖
     let dir = std::env::temp_dir().join(format!("azurpilot-bootstrap-{}", std::process::id()));
@@ -493,66 +492,17 @@ fn setup_git_ca_bundle() {
 /// 任一阶段失败（下载、更新、构建、同步、配置迁移）或用户取消时返回 Err，
 /// 由上层决定展示错误页面。
 pub fn setup_azurpilot_repo(
-    mut status_updater: impl FnMut(SplashUpdate),
+    status_updater: impl FnMut(SplashUpdate),
     cancel_requested: Arc<AtomicBool>,
     skip_repository_update: bool,
     sources: &Preferences,
 ) -> Result<()> {
-    info!("Starting setup for AzurPilot repository...");
-    status_updater(
-        SplashUpdate::loading(
-            t!("setup.preparing_workspace"),
-            t!("components.checking_detail"),
-            5,
-        )
-        .with_subtitle(t!("setup.checking_env", tip = get_tip())),
-    );
-    if crate::components::deployment_required(&azurpilot_repo_dir()) {
-        bail!(t!("launcher.deploy_hint"));
-    }
-    refresh_git_environment();
-    #[cfg(target_os = "linux")]
-    setup_git_ca_bundle();
-
-    let bootstrap_uv = bootstrap_uv_path()?;
-    ensure_runtime_tools(
-        &bootstrap_uv,
-        &cancel_requested,
-        &mut status_updater,
+    crate::warship::setup(
+        status_updater,
+        cancel_requested,
+        skip_repository_update,
         sources,
-    )?;
-    atomic_failure_cleanup("./config", &cancel_requested)?;
-    migrate_dependency_config(sources)?;
-    if skip_repository_update {
-        info!("Skipping AzurPilot repository update because preview no-update mode is enabled");
-        status_updater(
-            SplashUpdate::loading(
-                t!("setup.skipping_update"),
-                t!("setup.skipping_update_detail"),
-                41,
-            )
-            .with_subtitle(t!("setup.preview_mode", tip = get_tip())),
-        );
-    } else {
-        status_updater(
-            SplashUpdate::loading(t!("setup.updating"), t!("setup.fetching_patches"), 41)
-                .with_subtitle(t!("setup.syncing", tip = get_tip())),
-        );
-        git_update(&mut status_updater, &bootstrap_uv, &cancel_requested)?;
-        ensure_repository_files()?;
-    }
-    sync_dependencies_and_frontend(
-        &mut status_updater,
-        &bootstrap_uv,
-        &cancel_requested,
-        sources,
-        !skip_repository_update,
-    )?;
-    status_updater(
-        SplashUpdate::loading(t!("setup.finishing"), t!("setup.ready_to_launch"), 94)
-            .with_subtitle(t!("setup.launching", tip = get_tip())),
-    );
-    Ok(())
+    )
 }
 
 /// 用户主动修复：替换 git/adb 组件与 deploy 引导文件、删除 `.venv` 并重建工具与依赖。
@@ -562,49 +512,11 @@ pub fn setup_azurpilot_repo(
 /// # Errors
 /// 用户取消、组件下载或 `.venv` 删除失败、依赖同步失败时返回 Err。
 pub fn repair_environment(
-    mut status_updater: impl FnMut(SplashUpdate),
+    status_updater: impl FnMut(SplashUpdate),
     cancel_requested: Arc<AtomicBool>,
     sources: &Preferences,
 ) -> Result<()> {
-    if cancel_requested.load(Ordering::SeqCst) {
-        bail!(t!("launcher.cancelled"));
-    }
-
-    status_updater(
-        SplashUpdate::loading(t!("setup.preparing_env"), t!("launcher.repair_body"), 4)
-            .with_subtitle(t!("setup.rebuilding_env", tip = get_tip())),
-    );
-    crate::components::repair(
-        &azurpilot_repo_dir(),
-        &mut status_updater,
-        cancel_requested.clone(),
-        sources,
-    )?;
-    refresh_git_environment();
-    remove_venv_for_repair(&cancel_requested)?;
-
-    let bootstrap_uv = bootstrap_uv_path()?;
-    ensure_runtime_tools(
-        &bootstrap_uv,
-        &cancel_requested,
-        &mut status_updater,
-        sources,
-    )?;
-    if cancel_requested.load(Ordering::SeqCst) {
-        bail!(t!("launcher.cancelled"));
-    }
-
-    status_updater(
-        SplashUpdate::loading(t!("setup.installing_deps"), t!("setup.verifying_deps"), 70)
-            .with_subtitle(t!("setup.syncing_deps", tip = get_tip())),
-    );
-    migrate_dependency_config(sources)?;
-    uv_sync_project(
-        &mut status_updater,
-        &bootstrap_uv,
-        &cancel_requested,
-        sources,
-    )
+    crate::warship::repair(status_updater, cancel_requested, sources)
 }
 
 /// 读取解析后的 `config/deploy.yaml` 内容；文件缺失或格式错误时返回 `None`。
@@ -1675,7 +1587,7 @@ fn runtime_wait_update(
 ///
 /// # Errors
 /// 用户取消、Python 安装失败或工具部署失败时返回 Err。
-fn ensure_runtime_tools(
+pub(crate) fn ensure_runtime_tools(
     bootstrap_uv: &Path,
     cancel_requested: &AtomicBool,
     mut status_updater: impl FnMut(SplashUpdate),
@@ -1975,7 +1887,7 @@ fn ensure_deploy_python_dependencies(
         36,
     ));
     let mut import_check = Command::new(venv_python());
-    import_check.args(["-c", "import requests"]);
+    import_check.args(["-c", "import yaml"]);
     isolate_python_child_environment(&mut import_check);
     let status = run_status_command(&mut import_check, cancel_requested)?;
     if status.success() {
@@ -1993,7 +1905,7 @@ fn ensure_deploy_python_dependencies(
         let mut cmd = Command::new(bootstrap_uv);
         cmd.args(["pip", "install", "--python"])
             .arg(venv_python())
-            .arg("requests")
+            .arg("pyyaml==6.0.3")
             .args(["--default-index", index])
             .arg("--no-config")
             .env("UV_NO_PROGRESS", "1")
